@@ -13,7 +13,8 @@
     "lint": "eslint --max-warnings=0",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:live": "node --env-file=.env.local node_modules/vitest/vitest.mjs run"
   },
   "dependencies": {
     "@ai-sdk/google": "4.0.111",

@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: proofpay
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: 22.19.0
+      - key: PAYPAL_ENVIRONMENT
+        value: SANDBOX
+      - key: PAYOUT_CURRENCY
+        value: SGD
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_GENERATIVE_AI_API_KEY
+        sync: false
+      - key: PAYOUT_RECEIVER_EMAIL
+        sync: false

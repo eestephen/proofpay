@@ -40,3 +40,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local sqlite (reseeded on boot)
+/data/
+
+# local screenshots
+/demo/skeleton-*.png
