@@ -45,7 +45,7 @@ This block is written and re-added by `next dev` - verify at `node_modules/next/
 ### Issue tracker
 
 Markdown files in the OneDrive knowledge base (`...\Hackhathon\ProofPay\tracker\`)
-come first; Jira project `PP` mirrors them. See `docs/agents/issue-tracker.md`.
+come first; Jira project `PROOF` mirrors them. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

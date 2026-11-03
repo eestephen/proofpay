@@ -18,21 +18,21 @@ C:\Users\P1369959\OneDrive - NCS PTE LTD\KNOWLEDGE BASE\Hackhathon\ProofPay\trac
 - Near the top of each ticket file:
   - `Status:` with a triage label (see `triage-labels.md`)
   - `Blocked by: NN, NN` (omit when there are no blockers)
-  - `Jira: PP-<n>` (added once the Jira mirror exists)
+  - `Jira: PROOF-<n>` (added once the Jira mirror exists)
 - Comments go at the bottom of the file under `## Comments`.
 
 ## 2. Jira (mirror)
 
 - Site: `https://ee-zi-hao-stephen.atlassian.net` (cloudId
   `e38abb9a-f81e-4188-a53d-d1c1a5be627d`)
-- Project key: `PP` (ProofPay)
+- Project key: `PROOF` (ProofPay), board 138
 - A spec becomes an **Epic**. Each ticket becomes a **Story** under that epic,
   with its summary prefixed `NN `.
 - The triage label goes on as a Jira label (for example `ready-for-agent`).
 - Blocking edges become Jira "blocks" links.
 - The Jira description links back to the local file path.
 
-If project `PP` doesn't exist yet, write the local file first and leave out the
+If project `PROOF` doesn't exist yet, write the local file first and leave out the
 `Jira:` line. Mirror it once the project exists.
 
 ## When a skill says "publish to the issue tracker"
