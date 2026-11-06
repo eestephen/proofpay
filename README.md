@@ -7,7 +7,9 @@ AI buyer agent negotiated, and subcontractors are paid for milestones an AI
 verifier checked. A human approves every payment, and PayPal (sandbox) settles
 it. The AI never moves money on its own.
 
-Built for the PayPal AI Hackathon. Status: early development. See `docs/brief.md`.
+Built for the PayPal AI Hackathon. Status: walking skeleton. See `docs/brief.md`.
+
+**Live demo:** https://proofpay-988i.onrender.com (free tier: the first load after idle can take about a minute; demo data resets on restart).
 
 ## Run it locally
 
