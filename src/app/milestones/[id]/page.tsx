@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import { connection } from "next/server";
 import { app } from "@/server/app";
 import { ownerCredential } from "@/server/session";
-import { approveRelease, refreshPayout, submitProof } from "../../actions";
+import { approveRelease, overrideRelease, refreshPayout, submitProof } from "../../actions";
 
 type Props = {
   params: Promise<{ id: string }>;
@@ -70,11 +70,20 @@ async function MilestoneCard({ params, searchParams }: Props) {
           </p>
         )}
 
-        {owner && m.status === "awaiting_proof" && (
+        {owner && (m.status === "awaiting_proof" || m.status === "on_hold") && (
           <form action={submitProof} className="space-y-2">
             {idField}
-            <p className="font-medium">Payee: upload proof (invoice or work photo)</p>
-            <input accept="image/*" name="proof" required type="file" />
+            <p className="font-medium">
+              {m.status === "on_hold" ? "Resubmit proof" : "Upload proof on the payee's behalf"}
+            </p>
+            <label className="block text-sm">
+              Invoice (PNG, JPEG or WebP, up to 4 MB)
+              <input accept="image/png,image/jpeg,image/webp" className="block" name="proof" required type="file" />
+            </label>
+            <label className="block text-sm">
+              Work photos (optional, up to 2)
+              <input accept="image/png,image/jpeg,image/webp" className="block" multiple name="photos" type="file" />
+            </label>
             <button className="rounded bg-black px-4 py-2 text-white" type="submit">
               Submit proof for AI verification
             </button>
@@ -82,12 +91,17 @@ async function MilestoneCard({ params, searchParams }: Props) {
         )}
 
         {m.proof && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            alt="Submitted proof"
-            className="max-h-64 rounded border"
-            src={`data:${m.proof.mime};base64,${m.proof.image}`}
-          />
+          <div className="flex flex-wrap gap-2">
+            {[m.proof, ...m.photos].map((img, i) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                alt={i === 0 ? "Submitted invoice" : `Work photo ${i}`}
+                className="max-h-64 rounded border"
+                key={img.image.slice(0, 64) + i}
+                src={`data:${img.mime};base64,${img.image}`}
+              />
+            ))}
+          </div>
         )}
 
         {v && (
@@ -97,10 +111,29 @@ async function MilestoneCard({ params, searchParams }: Props) {
             </p>
             <ul className="ml-5 list-disc">
               {v.reasons.map((r) => (
-                <li key={r}>{r}</li>
+                <li className={v.flags?.includes(r) ? "font-semibold text-red-800" : undefined} key={r}>
+                  {v.flags?.includes(r) ? "Fraud check: " : ""}
+                  {r}
+                </li>
               ))}
             </ul>
+            {v.flags?.length > 0 && v.aiRecommendation === "release" && (
+              <p className="mt-2 text-sm">The AI alone said release; ProofPay&apos;s hard rules overruled it.</p>
+            )}
           </div>
+        )}
+
+        {owner && m.status === "on_hold" && (
+          <form action={overrideRelease} className="space-y-2 rounded border border-red-200 p-4">
+            {idField}
+            <label className="flex items-start gap-2 text-sm">
+              <input name="confirm" required type="checkbox" value="yes" />
+              I have reviewed the hold reasons above and want to release {m.amount} {m.currency} anyway.
+            </label>
+            <button className="rounded border border-red-600 px-4 py-2 text-red-700" type="submit">
+              Override hold and release
+            </button>
+          </form>
         )}
 
         {owner && m.status === "payout_failed" && (

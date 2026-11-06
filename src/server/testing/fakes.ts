@@ -2,17 +2,19 @@ import type { PayPalPort, ProofFile, VerifierInput, VerifierPort } from "../port
 import type { Verification } from "../verify";
 
 export function fakeVerifier(result: Partial<Verification> = {}) {
-  const calls: { milestone: VerifierInput; image: ProofFile }[] = [];
+  const calls: { milestone: VerifierInput; images: ProofFile[] }[] = [];
   let next: Verification = {
     recommendation: "release",
     extractedTotal: "unknown",
     reasons: ["looks fine"],
+    injectionDetected: false,
+    injectionNote: "",
     model: "fake",
     ...result,
   };
   const port: VerifierPort = {
-    async verify(milestone, image) {
-      calls.push({ milestone, image });
+    async verify(milestone, images) {
+      calls.push({ milestone, images });
       return next;
     },
   };

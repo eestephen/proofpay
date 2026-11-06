@@ -11,7 +11,8 @@ export type VerifierInput = {
 };
 
 export interface VerifierPort {
-  verify(milestone: VerifierInput, image: ProofFile): Promise<Verification>;
+  /** images[0] is the invoice; any others are work photos. */
+  verify(milestone: VerifierInput, images: ProofFile[]): Promise<Verification>;
 }
 
 export interface PayPalPort {

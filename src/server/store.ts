@@ -5,6 +5,7 @@ export type SeedOptions = { currency: string; payeeEmail: string; budgetMinor?: 
 
 const SCHEMA = `
   DROP TABLE IF EXISTS audit;
+  DROP TABLE IF EXISTS proof_file;
   DROP TABLE IF EXISTS milestone;
   DROP TABLE IF EXISTS project;
   DROP TABLE IF EXISTS meta;
@@ -26,14 +27,22 @@ const SCHEMA = `
     payee_name TEXT NOT NULL,
     payee_email TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'awaiting_proof',
-    proof_image TEXT,
-    proof_mime TEXT,
     verification TEXT,
     payout_batch_id TEXT,
     payout_status TEXT,
     payout_attempts INTEGER NOT NULL DEFAULT 0,
     payout_error TEXT
   );
+  CREATE TABLE proof_file (
+    id INTEGER PRIMARY KEY,
+    milestone_id INTEGER NOT NULL REFERENCES milestone(id),
+    role TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    data TEXT NOT NULL,
+    superseded INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX proof_file_sha ON proof_file(sha256);
   CREATE TABLE audit (
     id INTEGER PRIMARY KEY,
     milestone_id INTEGER NOT NULL REFERENCES milestone(id),

@@ -71,12 +71,21 @@ async function PayeeCard({ params, searchParams }: Props) {
         </div>
       )}
 
-      {m.status === "awaiting_proof" && (
+      {(m.status === "awaiting_proof" || m.status === "on_hold") && (
         <form action={submitProofAsPayee} className="mt-4 space-y-2">
           <input name="milestoneId" type="hidden" value={m.id} />
           <input name="t" type="hidden" value={token} />
-          <p className="font-medium">Upload your invoice or a photo of the finished work</p>
-          <input accept="image/*" name="proof" required type="file" />
+          <p className="font-medium">
+            {m.status === "on_hold" ? "Fix the issue and resubmit" : "Upload your invoice"}
+          </p>
+          <label className="block text-sm">
+            Invoice (PNG, JPEG or WebP, up to 4 MB)
+            <input accept="image/png,image/jpeg,image/webp" className="block" name="proof" required type="file" />
+          </label>
+          <label className="block text-sm">
+            Photos of the finished work (optional, up to 2)
+            <input accept="image/png,image/jpeg,image/webp" className="block" multiple name="photos" type="file" />
+          </label>
           <button className="rounded bg-black px-4 py-2 text-white" type="submit">
             Submit proof
           </button>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkRelease, formatMinor } from "./release";
+import { checkRelease, formatMinor, parseAmountMinor } from "./release";
 
 const enough = { amountMinor: 120000, remainingMinor: 800000 };
 
@@ -45,5 +45,24 @@ describe("formatMinor", () => {
     expect(formatMinor(120000)).toBe("1200.00");
     expect(formatMinor(5)).toBe("0.05");
     expect(formatMinor(0)).toBe("0.00");
+  });
+});
+
+describe("parseAmountMinor", () => {
+  it("reads document totals in common formats", () => {
+    expect(parseAmountMinor("$1,850.00")).toBe(185000);
+    expect(parseAmountMinor("SGD 1,200")).toBe(120000);
+    expect(parseAmountMinor("1200.5")).toBe(120050);
+  });
+  it("returns null when there is no amount", () => {
+    expect(parseAmountMinor("unknown")).toBeNull();
+  });
+});
+
+describe("checkRelease override", () => {
+  it("allows an on-hold milestone only with an override", () => {
+    const base = { status: "on_hold" as const, ownerApproved: true, amountMinor: 1, remainingMinor: 10 };
+    expect(checkRelease(base)).toEqual({ ok: false, reason: "not_ready" });
+    expect(checkRelease({ ...base, override: true })).toEqual({ ok: true });
   });
 });

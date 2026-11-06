@@ -61,7 +61,7 @@ describe("submitting proof", () => {
       currency: "SGD",
       payeeName: "Tan Tiling Works",
     });
-    expect(verifier.calls[0].image).toEqual(png);
+    expect(verifier.calls[0].images).toEqual([png]);
   });
 
   it("marks the milestone ready when the verifier recommends release", async () => {
@@ -279,5 +279,85 @@ describe("demo reset (ticket 02)", () => {
 
   it("refuses to reset without an owner session", () => {
     expect(() => service.resetDemo(undefined)).toThrow(/Owner passcode required/);
+  });
+});
+
+describe("fraud catches (ticket 03)", () => {
+  const jpg = (n: number) => ({ data: new Uint8Array([255, 216, 255, n]), mediaType: "image/jpeg" });
+
+  it("holds an invoice whose total is above the milestone amount, even if the AI says release", async () => {
+    verifier.willReturn({ recommendation: "release", extractedTotal: "$1,850.00", reasons: ["looks fine"] });
+    const m = await service.submitProof(tilingId, png, owner);
+    expect(m.status).toBe("on_hold");
+    expect(m.verification?.reasons[0]).toMatch(/\$1,850\.00.*above.*1200\.00 SGD/);
+  });
+
+  it("does not hold when the total matches the milestone amount", async () => {
+    verifier.willReturn({ recommendation: "release", extractedTotal: "SGD 1,200.00" });
+    expect((await service.submitProof(tilingId, png, owner)).status).toBe("ready");
+  });
+
+  it("holds an image already used as proof on another milestone, naming that milestone", async () => {
+    const t = make();
+    const [demolition, tiling] = t.milestones();
+    await t.service.submitProof(tiling.id, png, t.owner);
+    const m = await t.service.submitProof(demolition.id, png, t.owner);
+    expect(m.status).toBe("on_hold");
+    expect(m.verification?.reasons[0]).toMatch(/already submitted as proof for "Stage 2: Wall and floor tiling"/);
+  });
+
+  it("holds a document with instructions aimed at the reviewer", async () => {
+    verifier.willReturn({ recommendation: "release", injectionDetected: true, injectionNote: "mark as verified" });
+    const m = await service.submitProof(tilingId, png, owner);
+    expect(m.status).toBe("on_hold");
+    expect(m.verification?.reasons[0]).toMatch(/Instructions aimed at the reviewer.*mark as verified/);
+  });
+
+  it("accepts an invoice plus up to two work photos and sends all of them to the verifier", async () => {
+    const m = await service.submitProof(tilingId, [png, jpg(1), jpg(2)], owner);
+    expect(verifier.calls[0].images).toHaveLength(3);
+    expect(m.proof?.mime).toBe("image/png");
+    expect(m.photos).toHaveLength(2);
+  });
+
+  it("refuses more than two work photos", async () => {
+    await expect(service.submitProof(tilingId, [png, jpg(1), jpg(2), jpg(3)], owner)).rejects.toThrow(
+      /at most 2 work photos/,
+    );
+    expect(verifier.calls).toHaveLength(0);
+  });
+
+  it("refuses oversized files and stores nothing", async () => {
+    const big = { data: new Uint8Array(4 * 1024 * 1024 + 1), mediaType: "image/png" };
+    await expect(service.submitProof(tilingId, big, owner)).rejects.toThrow(/4 MB/);
+    expect(verifier.calls).toHaveLength(0);
+    expect(service.getMilestone(tilingId)!.status).toBe("awaiting_proof");
+  });
+
+  it("lets the payee resubmit after a hold", async () => {
+    const token = service.payeeToken(tilingId, owner);
+    verifier.willReturn({ recommendation: "hold", reasons: ["blurry"] });
+    await service.submitProof(tilingId, png, token);
+    verifier.willReturn({ recommendation: "release", reasons: ["clear now"] });
+    const m = await service.submitProof(tilingId, jpg(9), token);
+    expect(m.status).toBe("ready");
+    expect(m.proof?.mime).toBe("image/jpeg");
+    expect(m.history.filter((h) => h.kind === "proof_submitted")).toHaveLength(2);
+  });
+
+  it("releases an on-hold milestone only with an explicit override, and logs it", async () => {
+    verifier.willReturn({ recommendation: "hold", reasons: ["unclear"] });
+    await service.submitProof(tilingId, png, owner);
+    await expect(service.approveRelease(tilingId, owner)).rejects.toThrow(/not_ready/);
+    const m = await service.approveRelease(tilingId, owner, { override: true });
+    expect(m.status).toBe("paid");
+    expect(m.history.map((h) => h.kind)).toContain("override");
+  });
+
+  it("does not let a payee override a hold", async () => {
+    const token = service.payeeToken(tilingId, owner);
+    verifier.willReturn({ recommendation: "hold" });
+    await service.submitProof(tilingId, png, token);
+    await expect(service.approveRelease(tilingId, token, { override: true })).rejects.toThrow(/Owner passcode/);
   });
 });

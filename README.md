@@ -18,7 +18,12 @@ Built for the PayPal AI Hackathon. Status: walking skeleton. See `docs/brief.md`
 3. Open the **payee upload link** shown there (for example in a private window) and upload
    `demo/invoice-ok.png` from this repo.
 4. Back as the owner, click **approve and release**. A PayPal sandbox payout is sent.
-5. **Reset demo** (top right) restores the starting data.
+5. Try the fraud checks: upload `demo/invoice-inflated.png` (total above the milestone),
+   `demo/invoice-injection.png` (hidden text telling the AI to approve), or reuse an invoice
+   already submitted on another milestone. Each is put **on hold** with the reason shown, even
+   if the AI on its own would have said release. The owner can override a hold only by ticking
+   a confirmation box, and the override is logged.
+6. **Reset demo** (top right) restores the starting data.
 
 ## Run it locally
 
