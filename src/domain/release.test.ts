@@ -82,3 +82,15 @@ describe("nextPayoutStatus", () => {
     }
   });
 });
+
+describe("parseAmountMinor (strict)", () => {
+  it("rejects ambiguous formats", () => {
+    expect(parseAmountMinor("1.850,00")).toBeNull();
+    expect(parseAmountMinor("Inv 12 total 9,999")).toBeNull();
+    expect(parseAmountMinor("SGD 1 850")).toBeNull();
+  });
+  it("accepts currency prefixes and suffixes", () => {
+    expect(parseAmountMinor("S$1,200.00")).toBe(120000);
+    expect(parseAmountMinor("1,200.00 SGD")).toBe(120000);
+  });
+});

@@ -61,7 +61,8 @@ async function channel3Search(query: string, currency: string, key: string): Pro
       id: p.id,
       title: p.title,
       merchant: offer.domain ?? "unknown",
-      url: offer.url ?? null,
+      // Only plain web links reach an href.
+      url: offer.url && /^https?:\/\//i.test(offer.url) ? offer.url : null,
       priceMinor,
       listedPrice: `${offer.price.currency} ${offer.price.price.toFixed(2)}`,
       source: "channel3",

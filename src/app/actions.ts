@@ -3,6 +3,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { app } from "@/server/app";
+import { OWNER_SESSION_MS } from "@/server/service";
 import { OWNER_COOKIE, ownerCredential } from "@/server/session";
 
 // Thin wrappers: parse input, attach the caller's credential, call the app
@@ -76,7 +77,7 @@ export async function signIn(formData: FormData) {
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: 60 * 60 * 12,
+    maxAge: OWNER_SESSION_MS / 1000,
   });
   redirect("/");
 }

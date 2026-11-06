@@ -40,9 +40,13 @@ export function formatMinor(minor: number): string {
   return `${sign}${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, "0")}`;
 }
 
-/** First amount in a document total like "$1,850.00" or "SGD 1,200", in minor units. */
+/**
+ * A document total like "$1,850.00", "S$1,200", "SGD 1,200" or "1200.50 SGD", in minor
+ * units. Anything ambiguous ("1.850,00", "1 850", several numbers) returns null, so the
+ * hard rule holds it rather than guessing.
+ */
 export function parseAmountMinor(text: string): number | null {
-  const match = /(\d[\d,]*)(?:\.(\d{1,2}))?/.exec(text);
+  const match = /^(?:[A-Z]{0,3}\s?\$?)\s*(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?\s*(?:[A-Z]{3})?$/i.exec(text.trim());
   if (!match) return null;
   const whole = Number(match[1].replace(/,/g, ""));
   const cents = match[2] ? Number(match[2].padEnd(2, "0")) : 0;

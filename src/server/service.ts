@@ -248,13 +248,23 @@ const PROJECT_SQL = `
   SELECT p.id, p.name, p.mode, p.budget_minor, p.currency,
          COALESCE((SELECT SUM(amount_minor) FROM milestone m WHERE m.project_id = p.id AND m.status = 'paid'), 0)
            + COALESCE((SELECT SUM(order_total_minor) FROM purchase o WHERE o.project_id = p.id AND o.order_status = 'ordered'), 0) AS released_minor,
-         COALESCE((SELECT SUM(amount_minor) FROM milestone m WHERE m.project_id = p.id AND m.status = 'approved'), 0)
-           + COALESCE((SELECT SUM(order_total_minor) FROM purchase o WHERE o.project_id = p.id AND o.order_status = 'ordering'), 0) AS in_flight_minor
+         COALESCE((SELECT SUM(amount_minor) FROM milestone m WHERE m.project_id = p.id AND (m.status = 'approved' OR (m.status = 'payout_failed' AND m.payout_request_id IS NOT NULL))), 0)
+           + COALESCE((SELECT SUM(order_total_minor) FROM purchase o WHERE o.project_id = p.id AND (o.order_status = 'ordering' OR (o.order_status = 'order_failed' AND o.order_request_id IS NOT NULL))), 0) AS in_flight_minor
   FROM project p`;
 
 const MILESTONE_SQL = `
   SELECT m.*, p.name AS project_name, p.mode AS project_mode, p.currency
   FROM milestone m JOIN project p ON p.id = m.project_id`;
+
+/**
+ * What can still be released. In-flight money (approved, ordering, or a failure PayPal
+ * may still have paid) already counts as committed.
+ */
+function remainingMinor(p: ProjectRow): number {
+  return p.budget_minor - p.released_minor - p.in_flight_minor;
+}
+
+export const MAX_PROOF_SUBMISSIONS = 5;
 
 function toSummary(r: ProjectRow): ProjectSummary {
   return {
@@ -265,7 +275,7 @@ function toSummary(r: ProjectRow): ProjectSummary {
       budget: formatMinor(r.budget_minor),
       released: formatMinor(r.released_minor),
       committed: formatMinor(r.in_flight_minor),
-      remaining: formatMinor(r.budget_minor - r.released_minor - r.in_flight_minor),
+      remaining: formatMinor(remainingMinor(r)),
       currency: r.currency,
     },
   };
@@ -370,7 +380,7 @@ export function createService({
   function audit(milestoneId: number, kind: AuditKind, detail: string) {
     db.prepare(`INSERT INTO audit (milestone_id, at, kind, detail) VALUES (?, ?, ?, ?)`).run(
       milestoneId,
-      new Date().toISOString(),
+      new Date(now()).toISOString(),
       kind,
       detail,
     );
@@ -409,6 +419,30 @@ export function createService({
     } else {
       db.prepare(`UPDATE milestone SET payout_status = ? WHERE id = ?`).run(status, row.id);
       audit(row.id, "payout_status", `batch ${row.payout_batch_id}: ${status} (${source})`);
+    }
+    return true;
+  }
+
+  /**
+   * The supplier-order twin of applyPayoutStatus. A failure is final: the order moves
+   * to order_failed, out of the totals, with a fresh request id on retry.
+   */
+  function applyOrderPayoutStatus(batchId: string, status: string, source: string): boolean | undefined {
+    const order = db
+      .prepare(`SELECT id, order_status, payout_status FROM purchase WHERE payout_batch_id = ?`)
+      .get(batchId) as { id: number; order_status: string | null; payout_status: string | null } | undefined;
+    if (!order) return undefined;
+    if (order.order_status !== "ordering" && order.order_status !== "ordered") return false;
+    const next = nextPayoutStatus(order.payout_status, status);
+    if (!next.apply) return false;
+    if (next.failed) {
+      db.prepare(
+        `UPDATE purchase SET order_status = 'order_failed', payout_status = ?, order_error = ?, order_request_id = NULL WHERE id = ?`,
+      ).run(status, `PayPal batch ${batchId} ended ${status}`, order.id);
+      auditPurchase(order.id, "payout_failed", `batch ${batchId}: ${status} (${source})`);
+    } else {
+      db.prepare(`UPDATE purchase SET payout_status = ? WHERE id = ?`).run(status, order.id);
+      auditPurchase(order.id, "payout_status", `batch ${batchId}: ${status} (${source})`);
     }
     return true;
   }
@@ -585,6 +619,10 @@ export function createService({
     const totalMinor = parseAmountMinor(v.extractedTotal);
     if (totalMinor === null) {
       flags.push("Could not read a total from the invoice, so the amount cannot be checked");
+    } else if (totalMinor * 2 < row.amount_minor) {
+      flags.push(
+        `Document total ${v.extractedTotal} is far below the milestone amount ${formatMinor(row.amount_minor)} ${row.currency}, but the payout would be the full amount`,
+      );
     } else if (totalMinor > row.amount_minor) {
       flags.push(
         `Document total ${v.extractedTotal} is above the milestone amount ${formatMinor(row.amount_minor)} ${row.currency}`,
@@ -649,6 +687,15 @@ export function createService({
         )
         .run(id);
       if (changes === 0) throw new Error(`Proof cannot be submitted now (status: ${row.status})`);
+      const { n } = db
+        .prepare(`SELECT COUNT(*) AS n FROM audit WHERE milestone_id = ? AND kind = 'proof_submitted'`)
+        .get(id) as { n: number };
+      if (n >= MAX_PROOF_SUBMISSIONS) {
+        db.prepare(`UPDATE milestone SET status = ? WHERE id = ?`).run(previous, id);
+        throw new Error(
+          `A milestone accepts at most ${MAX_PROOF_SUBMISSIONS} proof submissions; ask the owner to review it`,
+        );
+      }
       audit(
         id,
         "proof_submitted",
@@ -678,7 +725,7 @@ export function createService({
 
       const hashes = files.map((f) => sha256(f.data));
       const assessment = assess(row, verification, hashes);
-      db.prepare(`UPDATE proof_file SET superseded = 1 WHERE milestone_id = ?`).run(id);
+      db.prepare(`UPDATE proof_file SET superseded = 1, data = '' WHERE milestone_id = ?`).run(id);
       const insert = db.prepare(
         `INSERT INTO proof_file (milestone_id, role, mime, sha256, data) VALUES (?, ?, ?, ?, ?)`,
       );
@@ -712,7 +759,9 @@ export function createService({
         status: row.status,
         ownerApproved: true,
         amountMinor: row.amount_minor,
-        remainingMinor: p.budget_minor - p.released_minor - p.in_flight_minor,
+        // A retry of an unclear failure is already counted as committed; do not count it twice.
+        remainingMinor:
+          remainingMinor(p) + (row.status === "payout_failed" && row.payout_request_id ? row.amount_minor : 0),
         override,
       });
       if (!check.ok) throw new Error(`Release refused: ${check.reason}`);
@@ -792,6 +841,8 @@ export function createService({
         return { result: "rejected", reason: "body is not JSON" };
       }
       if (typeof event.id !== "string") return { result: "rejected", reason: "event has no id" };
+      const seen = db.prepare(`SELECT 1 FROM webhook_event WHERE id = ?`).get(event.id);
+      if (seen) return { result: "duplicate", reason: `event ${event.id} already handled` };
       const started = epoch();
       if (!(await paypal.verifyWebhook(delivery.headers, delivery.body))) {
         return { result: "rejected", reason: "PayPal did not confirm the signature" };
@@ -807,24 +858,12 @@ export function createService({
       const row = db.prepare(`${MILESTONE_SQL} WHERE m.payout_batch_id = ?`).get(payout.batchId) as
         MilestoneRow | undefined;
       if (!row) {
-        const order = db
-          .prepare(`SELECT id, payout_status FROM purchase WHERE payout_batch_id = ?`)
-          .get(payout.batchId) as { id: number; payout_status: string | null } | undefined;
-        if (!order) return { result: "ignored", reason: `no milestone or order for batch ${payout.batchId}` };
-        const next = nextPayoutStatus(order.payout_status, payout.status);
-        if (!next.apply)
-          return { result: "ignored", reason: `${payout.status} does not move ${order.payout_status} forward` };
-        db.prepare(`UPDATE purchase SET payout_status = ?, order_status = ? WHERE id = ?`).run(
-          payout.status,
-          next.failed ? "order_failed" : "ordered",
-          order.id,
-        );
-        auditPurchase(
-          order.id,
-          "payout_status",
-          `batch ${payout.batchId}: ${payout.status} (webhook ${event.event_type})`,
-        );
-        return { result: "applied", reason: `order ${order.id} ${payout.batchId}: ${payout.status}` };
+        const applied = applyOrderPayoutStatus(payout.batchId, payout.status, `webhook ${event.event_type}`);
+        if (applied === undefined)
+          return { result: "ignored", reason: `no milestone or order for batch ${payout.batchId}` };
+        return applied
+          ? { result: "applied", reason: `order ${payout.batchId}: ${payout.status}` }
+          : { result: "ignored", reason: `${payout.status} does not move the order forward` };
       }
       return applyPayoutStatus(row, payout.status, `webhook ${event.event_type}`)
         ? { result: "applied", reason: `${payout.batchId}: ${payout.status}` }
@@ -1067,8 +1106,13 @@ export function createService({
       const win = view.rows.find((r) => r.supplierId === view.recommendation!.supplierId)!;
       const totalMinor = Math.round(win.total * 100);
       const p = project(view.projectId)!;
-      const remaining = p.budget_minor - p.released_minor - p.in_flight_minor;
-      if (totalMinor > remaining) throw new Error("Order refused: insufficient_fund");
+      const prior = db
+        .prepare(
+          `SELECT order_total_minor FROM purchase WHERE id = ? AND order_status = 'order_failed' AND order_request_id IS NOT NULL`,
+        )
+        .get(purchaseId) as { order_total_minor: number } | undefined;
+      if (totalMinor > remainingMinor(p) + (prior?.order_total_minor ?? 0))
+        throw new Error("Order refused: insufficient_fund");
 
       const started = epoch();
       const prev = db.prepare(`SELECT order_attempts, order_request_id FROM purchase WHERE id = ?`).get(purchaseId) as {
@@ -1144,18 +1188,25 @@ export function createService({
         );
         auditPurchase(purchaseId, "invoice", `PayPal invoice ${inv.invoiceId}: ${status}`);
       } catch (err) {
+        assertSameEpoch(started);
         const message = err instanceof Error ? err.message : String(err);
         db.prepare(`UPDATE purchase SET invoice_error = ? WHERE id = ?`).run(message, purchaseId);
         auditPurchase(purchaseId, "invoice_failed", message);
       }
 
+      assertSameEpoch(started);
       // Simulated supplier dispatch: carrier and tracking number for the order.
       const digits = createHash("sha256").update(`${started}:${purchaseId}`).digest().readUInt32BE(0) % 100_000_000;
       const tracking = `${win.supplierName.slice(0, 2).toUpperCase()}${String(digits).padStart(8, "0")}SG`;
-      db.prepare(
-        `UPDATE purchase SET order_status = 'ordered', tracking_number = ?, tracking_carrier = ?, ordered_at = ? WHERE id = ?`,
-      ).run(tracking, `${win.supplierName} Logistics`, new Date(now()).toISOString(), purchaseId);
-      auditPurchase(purchaseId, "shipped", `tracking ${tracking}, delivery in ${win.leadDays} days`);
+      // Only if no webhook reported a failure while the invoice calls were in flight.
+      const shipped = db
+        .prepare(
+          `UPDATE purchase SET order_status = 'ordered', tracking_number = ?, tracking_carrier = ?, ordered_at = ?
+           WHERE id = ? AND order_status = 'ordering'`,
+        )
+        .run(tracking, `${win.supplierName} Logistics`, new Date(now()).toISOString(), purchaseId);
+      if (shipped.changes > 0)
+        auditPurchase(purchaseId, "shipped", `tracking ${tracking}, delivery in ${win.leadDays} days`);
       return getPurchase(purchaseId)!;
     },
 

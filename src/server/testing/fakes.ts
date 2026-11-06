@@ -53,6 +53,7 @@ export function fakePayPal() {
   let failure: { message: string; definite: boolean } | null = null;
   let webhooksGenuine = true;
   let invoiceFailure: string | null = null;
+  let invoiceGate: Promise<void> | null = null;
   const invoices: Parameters<PayPalPort["createPurchaseInvoice"]>[0][] = [];
   const invoicePayments: { invoiceId: string; amount: string; currency: string; note: string }[] = [];
   let gate: Promise<void> | null = null;
@@ -76,6 +77,7 @@ export function fakePayPal() {
       return webhooksGenuine;
     },
     async createPurchaseInvoice(input) {
+      if (invoiceGate) await invoiceGate;
       if (invoiceFailure) throw new Error(invoiceFailure);
       invoices.push(input);
       return { invoiceId: `INV${invoices.length}`, status: "SENT" };
@@ -90,6 +92,15 @@ export function fakePayPal() {
     payouts,
     invoices,
     invoicePayments,
+    /** Holds the next createPurchaseInvoice call until the returned function is called. */
+    pauseInvoices(): () => void {
+      let release!: () => void;
+      invoiceGate = new Promise<void>((r) => (release = r));
+      return () => {
+        invoiceGate = null;
+        release();
+      };
+    },
     /** Every invoice call fails with this message from now on. */
     failInvoices(message: string) {
       invoiceFailure = message;

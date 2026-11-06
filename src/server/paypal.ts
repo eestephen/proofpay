@@ -1,11 +1,18 @@
 import { PayoutRejected, type PayPalPort } from "./ports";
 
 const BASE =
-  process.env.PAYPAL_ENVIRONMENT === "PRODUCTION"
-    ? "https://api-m.paypal.com"
-    : "https://api-m.sandbox.paypal.com";
+  process.env.PAYPAL_ENVIRONMENT === "PRODUCTION" ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
 
+const TIMEOUT_MS = 20_000;
+let cachedToken: { value: string; expiresAt: number } | null = null;
+
+/** Cached client-credentials token, refreshed a minute before it expires. */
 async function accessToken(): Promise<string> {
+  if (cachedToken && Date.now() < cachedToken.expiresAt) return cachedToken.value;
+  return fetchToken();
+}
+
+async function fetchToken(): Promise<string> {
   const id = process.env.PAYPAL_CLIENT_ID;
   const secret = process.env.PAYPAL_CLIENT_SECRET;
   if (!id || !secret) throw new Error("PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET not set");
@@ -16,9 +23,12 @@ async function accessToken(): Promise<string> {
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body: "grant_type=client_credentials",
+    signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`PayPal auth failed: ${res.status} ${await res.text()}`);
-  return ((await res.json()) as { access_token: string }).access_token;
+  const body = (await res.json()) as { access_token: string; expires_in: number };
+  cachedToken = { value: body.access_token, expiresAt: Date.now() + (body.expires_in - 60) * 1000 };
+  return body.access_token;
 }
 
 /** Sends one sandbox payout. Never exposed as an AI tool. */
@@ -31,6 +41,7 @@ export async function createPayout(input: {
 }): Promise<{ batchId: string; status: string }> {
   const token = await accessToken();
   const res = await fetch(`${BASE}/v1/payments/payouts`, {
+    signal: AbortSignal.timeout(TIMEOUT_MS),
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -67,6 +78,7 @@ export async function createPayout(input: {
 export async function getPayoutStatus(batchId: string): Promise<string> {
   const token = await accessToken();
   const res = await fetch(`${BASE}/v1/payments/payouts/${encodeURIComponent(batchId)}`, {
+    signal: AbortSignal.timeout(TIMEOUT_MS),
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error(`PayPal payout lookup failed: ${res.status} ${await res.text()}`);
@@ -81,16 +93,22 @@ export function webhookUrl(): string | undefined {
 }
 
 let webhookId = process.env.PAYPAL_WEBHOOK_ID || undefined;
+let webhookLookupFailedAt = 0;
 
 /** PAYPAL_WEBHOOK_ID if set, otherwise the registered webhook whose URL matches this deployment. */
 async function resolveWebhookId(token: string): Promise<string | undefined> {
   if (webhookId) return webhookId;
   const url = webhookUrl();
-  if (!url) return undefined;
-  const res = await fetch(`${BASE}/v1/notifications/webhooks`, { headers: { Authorization: `Bearer ${token}` } });
+  // Forged deliveries must not make us list webhooks on every request.
+  if (!url || Date.now() - webhookLookupFailedAt < 5 * 60_000) return undefined;
+  const res = await fetch(`${BASE}/v1/notifications/webhooks`, {
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+    headers: { Authorization: `Bearer ${token}` },
+  });
   if (!res.ok) throw new Error(`PayPal webhook list failed: ${res.status} ${await res.text()}`);
   const { webhooks } = (await res.json()) as { webhooks: { id: string; url: string }[] };
   webhookId = webhooks.find((w) => w.url === url)?.id;
+  if (!webhookId) webhookLookupFailedAt = Date.now();
   return webhookId;
 }
 
@@ -105,6 +123,7 @@ export async function verifyWebhook(headers: Record<string, string>, body: strin
     `"transmission_id":${h("paypal-transmission-id")},"transmission_sig":${h("paypal-transmission-sig")},` +
     `"transmission_time":${h("paypal-transmission-time")},"webhook_id":${JSON.stringify(id)},"webhook_event":${body}}`;
   const res = await fetch(`${BASE}/v1/notifications/verify-webhook-signature`, {
+    signal: AbortSignal.timeout(TIMEOUT_MS),
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: payload,
@@ -117,7 +136,13 @@ async function invoicing(path: string, init: RequestInit = {}) {
   const token = await accessToken();
   const res = await fetch(`${BASE}/v2/invoicing/invoices${path}`, {
     ...init,
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Prefer: "return=representation", ...init.headers },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
+      ...init.headers,
+    },
   });
   if (!res.ok) throw new Error(`PayPal invoicing failed: ${res.status} ${await res.text()}`);
   return res.status === 204 ? {} : res.json();
@@ -134,7 +159,9 @@ export const createPurchaseInvoice: PayPalPort["createPurchaseInvoice"] = async 
         note: input.note,
         payment_term: { term_type: "DUE_ON_RECEIPT" },
       },
-      primary_recipients: [{ billing_info: { email_address: input.recipientEmail, business_name: input.supplierName } }],
+      primary_recipients: [
+        { billing_info: { email_address: input.recipientEmail, business_name: input.supplierName } },
+      ],
       items: [
         {
           name: input.item.slice(0, 200),

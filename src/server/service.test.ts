@@ -816,3 +816,88 @@ describe("NGO mode and donor impact page (ticket 09)", () => {
     expect(ngo().fund.released).toBe("0.00");
   });
 });
+
+describe("hardening review fixes", () => {
+  const ask = "Buy 40 m2 of porcelain floor tiles, max 1,300 SGD, within 5 days";
+  const hook = (id: string, type: string, resource: object) => ({ headers: {}, body: JSON.stringify({ id, event_type: type, resource }) });
+
+  async function ordered() {
+    const t = make();
+    const projectId = t.service.listProjects()[0].id;
+    const p = await t.service.requestMaterials(projectId, ask, t.owner);
+    await t.service.approveQuote(p.id, t.owner);
+    return { ...t, p };
+  }
+
+  it("keeps a failed supplier payout failed when a batch SUCCESS arrives afterwards", async () => {
+    const t = await ordered();
+    await t.service.handleWebhook(hook("A", "PAYMENT.PAYOUTS-ITEM.FAILED", { payout_batch_id: "BATCH1", transaction_status: "FAILED" }));
+    await t.service.handleWebhook(hook("B", "PAYMENT.PAYOUTSBATCH.SUCCESS", { batch_header: { payout_batch_id: "BATCH1", batch_status: "SUCCESS" } }));
+    const o = t.service.getPurchase(t.p.id)!.order!;
+    expect(o.status).toBe("order_failed");
+    expect(o.error).toMatch(/FAILED/);
+    expect(t.service.listProjects()[0].fund.released).toBe("0.00");
+  });
+
+  it("retries a supplier order after a webhook failure with a new request id", async () => {
+    const t = await ordered();
+    await t.service.handleWebhook(hook("A", "PAYMENT.PAYOUTS-ITEM.FAILED", { payout_batch_id: "BATCH1", transaction_status: "FAILED" }));
+    await t.service.approveQuote(t.p.id, t.owner);
+    expect(t.paypal.payouts[0].requestId).not.toBe(t.paypal.payouts[1].requestId);
+  });
+
+  it("does not let the end of an order overwrite a failure reported meanwhile", async () => {
+    const t = make();
+    const projectId = t.service.listProjects()[0].id;
+    const p = await t.service.requestMaterials(projectId, ask, t.owner);
+    t.paypal.failInvoices("slow");
+    const resume = t.paypal.pauseInvoices();
+    const pending = t.service.approveQuote(p.id, t.owner);
+    await new Promise((r) => setTimeout(r, 0));
+    await t.service.handleWebhook(hook("A", "PAYMENT.PAYOUTS-ITEM.DENIED", { payout_batch_id: "BATCH1", transaction_status: "DENIED" }));
+    resume();
+    const o = (await pending).order!;
+    expect(o.status).toBe("order_failed");
+  });
+
+  it("counts a payout with an unclear outcome as committed, but still lets it be retried", async () => {
+    const t = make({ budgetMinor: 250000 }); // 2,500: tiling 1,200 + demolition 1,500 cannot both go
+    const [demolition, tiling] = t.milestones();
+    await t.service.submitProof(tiling.id, png, t.owner);
+    t.paypal.failNext("network timeout", { definite: false });
+    await t.service.approveRelease(tiling.id, t.owner);
+    expect(t.service.listProjects()[0].fund).toMatchObject({ committed: "1200.00", remaining: "1300.00" });
+    t.verifier.willReturn({ extractedTotal: "1500.00" });
+    await t.service.submitProof(demolition.id, { data: new Uint8Array([7, 7]), mediaType: "image/png" }, t.owner);
+    await expect(t.service.approveRelease(demolition.id, t.owner)).rejects.toThrow(/insufficient_fund/);
+    expect((await t.service.approveRelease(tiling.id, t.owner)).status).toBe("paid");
+  });
+
+  it("holds an invoice whose total is far below the milestone amount", async () => {
+    verifier.willReturn({ extractedTotal: "$120.00" });
+    const m = await service.submitProof(tilingId, png, owner);
+    expect(m.status).toBe("on_hold");
+    expect(m.verification?.reasons[0]).toMatch(/below the milestone amount/);
+  });
+
+  it("holds totals written in an ambiguous number format", async () => {
+    verifier.willReturn({ extractedTotal: "1.850,00" });
+    expect((await service.submitProof(tilingId, png, owner)).verification?.reasons[0]).toMatch(/Could not read a total/);
+  });
+
+  it("caps proof submissions per milestone", async () => {
+    verifier.willReturn({ recommendation: "hold" });
+    for (let i = 0; i < 5; i++) await service.submitProof(tilingId, { data: new Uint8Array([i, 1]), mediaType: "image/png" }, owner);
+    await expect(service.submitProof(tilingId, { data: new Uint8Array([9, 1]), mediaType: "image/png" }, owner)).rejects.toThrow(/at most 5/);
+    expect(verifier.calls).toHaveLength(5);
+  });
+
+  it("does not ask PayPal to verify an event id it already handled", async () => {
+    let verifications = 0;
+    const real = paypal.port.verifyWebhook;
+    paypal.port.verifyWebhook = async (...a) => (verifications++, real(...a));
+    await service.handleWebhook(hook("SAME", "CHECKOUT.ORDER.APPROVED", {}));
+    await service.handleWebhook(hook("SAME", "CHECKOUT.ORDER.APPROVED", {}));
+    expect(verifications).toBe(1);
+  });
+});
