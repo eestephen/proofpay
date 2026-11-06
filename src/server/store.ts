@@ -132,6 +132,33 @@ const KITCHEN: SeedMilestone[] = [
   ],
 ];
 
+const FLOOD: SeedMilestone[] = [
+  [
+    "Phase 1: Mud and debris clean-up",
+    "Clear mud and flood debris from 12 homes and the community hall; dispose of waste at the approved site.",
+    120000,
+    "Kampung Baru Residents' Committee",
+  ],
+  [
+    "Phase 2: Safe water for 60 families",
+    "Install and hand over 60 gravity water filters, with a short training session per household.",
+    150000,
+    "Clean Water Volunteers Network",
+  ],
+  [
+    "Phase 3: Roof repairs for 6 homes",
+    "Replace damaged roof sheets and gutters on 6 homes, photos before and after each roof.",
+    160000,
+    "Aziz Roofing Cooperative",
+  ],
+  [
+    "Phase 4: Livelihood restart kits",
+    "Deliver 20 kits (tools and stock) to hawkers and home businesses whose equipment was lost.",
+    70000,
+    "Kampung Baru Residents' Committee",
+  ],
+];
+
 /**
  * Drops everything and writes the demo seed. A fresh random epoch means payee
  * links issued before a reset stop working.
@@ -141,16 +168,21 @@ export function seedStore(db: DatabaseSync, seed: SeedOptions): void {
   try {
     db.exec(SCHEMA);
     db.prepare(`INSERT INTO meta (key, value) VALUES ('epoch', ?)`).run(randomBytes(16).toString("hex"));
-    const { lastInsertRowid: projectId } = db
-      .prepare(`INSERT INTO project (name, mode, budget_minor, currency) VALUES (?, 'sme', ?, ?)`)
-      .run("Kitchen renovation, 14 Elm St", seed.budgetMinor ?? 800000, seed.currency);
+    const insertProject = db.prepare(`INSERT INTO project (name, mode, budget_minor, currency) VALUES (?, ?, ?, ?)`);
     const insert = db.prepare(
       `INSERT INTO milestone (project_id, position, title, description, amount_minor, payee_name, payee_email)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     );
-    KITCHEN.forEach(([title, description, amount, payee], i) =>
-      insert.run(projectId, i + 1, title, description, amount, payee, seed.payeeEmail),
-    );
+    const projects: [string, "sme" | "ngo", number, SeedMilestone[]][] = [
+      ["Kitchen renovation, 14 Elm St", "sme", seed.budgetMinor ?? 800000, KITCHEN],
+      ["Flood recovery, Kampung Baru", "ngo", 500000, FLOOD],
+    ];
+    for (const [name, mode, budget, milestones] of projects) {
+      const { lastInsertRowid: projectId } = insertProject.run(name, mode, budget, seed.currency);
+      milestones.forEach(([title, description, amount, payee], i) =>
+        insert.run(projectId, i + 1, title, description, amount, payee, seed.payeeEmail),
+      );
+    }
     db.exec("COMMIT");
   } catch (err) {
     db.exec("ROLLBACK");

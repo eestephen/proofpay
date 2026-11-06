@@ -6,6 +6,7 @@ import { app } from "@/server/app";
 import { ownerCredential } from "@/server/session";
 import { approveRelease, overrideRelease, refreshPayout, submitProof } from "../../actions";
 import { AutoRefresh } from "../../auto-refresh";
+import { WORDS } from "../../words";
 
 type Props = {
   params: Promise<{ id: string }>;
@@ -27,6 +28,7 @@ async function MilestoneCard({ params, searchParams }: Props) {
   const m = app().getMilestone(Number((await params).id));
   if (!m) notFound();
   const error = (await searchParams).error;
+  const w = WORDS[m.projectMode];
   const credential = await ownerCredential();
   const owner = app().isOwner(credential);
   const payeeLink = owner ? `/payee/${m.id}?t=${encodeURIComponent(app().payeeToken(m.id, credential))}` : null;
@@ -58,14 +60,17 @@ async function MilestoneCard({ params, searchParams }: Props) {
 
         {!owner && (
           <p className="rounded bg-gray-100 p-3 text-sm">
-            Viewing as a visitor. <Link className="underline" href="/login">Sign in as owner</Link> to upload
-            proof or release payment.
+            Viewing as a visitor.{" "}
+            <Link className="underline" href="/login">
+              Sign in as {w.owner.toLowerCase()}
+            </Link>{" "}
+            to upload proof or release payment.
           </p>
         )}
 
         {payeeLink && m.status === "awaiting_proof" && (
           <p className="rounded bg-gray-100 p-3 text-sm">
-            Payee upload link (share with {m.payeeName}):{" "}
+            {w.payee} upload link (share with {m.payeeName}):{" "}
             <Link className="break-all underline" href={payeeLink}>
               {payeeLink}
             </Link>
@@ -76,7 +81,7 @@ async function MilestoneCard({ params, searchParams }: Props) {
           <form action={submitProof} className="space-y-2">
             {idField}
             <p className="font-medium">
-              {m.status === "on_hold" ? "Resubmit proof" : "Upload proof on the payee's behalf"}
+              {m.status === "on_hold" ? "Resubmit proof" : `Upload proof on the ${w.payee.toLowerCase()}'s behalf`}
             </p>
             <label className="block text-sm">
               Invoice (PNG, JPEG or WebP, up to 4 MB)
@@ -129,8 +134,8 @@ async function MilestoneCard({ params, searchParams }: Props) {
           <form action={overrideRelease} className="space-y-2 rounded border border-red-200 p-4">
             {idField}
             <label className="flex items-start gap-2 text-sm">
-              <input name="confirm" required type="checkbox" value="yes" />
-              I have reviewed the hold reasons above and want to release {m.amount} {m.currency} anyway.
+              <input name="confirm" required type="checkbox" value="yes" />I have reviewed the hold reasons above and
+              want to release {m.amount} {m.currency} anyway.
             </label>
             <button className="rounded border border-red-600 px-4 py-2 text-red-700" type="submit">
               Override hold and release
@@ -155,7 +160,7 @@ async function MilestoneCard({ params, searchParams }: Props) {
           <form action={approveRelease}>
             {idField}
             <button className="rounded bg-blue-600 px-4 py-2 text-white" type="submit">
-              Owner: approve and release {m.amount} {m.currency} via PayPal
+              {w.owner}: approve and release {m.amount} {m.currency} via PayPal
             </button>
           </form>
         )}
@@ -188,8 +193,8 @@ async function MilestoneCard({ params, searchParams }: Props) {
           <ol className="space-y-1 text-sm">
             {m.history.map((h) => (
               <li className="border-l-2 pl-3" key={`${h.at}-${h.kind}-${h.detail}`}>
-                <span className="text-gray-500">{new Date(h.at).toLocaleString("en-SG")}</span>{" "}
-                <code>{h.kind}</code> {h.detail}
+                <span className="text-gray-500">{new Date(h.at).toLocaleString("en-SG")}</span> <code>{h.kind}</code>{" "}
+                {h.detail}
               </li>
             ))}
           </ol>

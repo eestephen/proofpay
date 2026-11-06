@@ -40,6 +40,7 @@ beforeEach(() => {
 describe("seeded project", () => {
   it("lists the kitchen renovation with its full fund remaining", () => {
     const [project] = service.listProjects();
+    expect(project.mode).toBe("sme");
     expect(project.name).toBe("Kitchen renovation, 14 Elm St");
     expect(project.fund).toEqual({
       budget: "8000.00",
@@ -758,5 +759,60 @@ describe("supplier order (ticket 08)", () => {
     const t = await quoted();
     await t.service.approveQuote(t.p.id, t.owner);
     expect(t.service.getBoard(t.projectId)!.fund.released).toBe(t.p.recommendation!.total.toFixed(2));
+  });
+});
+
+describe("NGO mode and donor impact page (ticket 09)", () => {
+  const ngo = () => service.listProjects().find((p) => p.mode === "ngo")!;
+
+  it("seeds a flood-recovery project for NGO mode, with field partners", () => {
+    const p = ngo();
+    expect(p.name).toMatch(/Flood recovery/);
+    expect(p.fund.budget).toBe("5000.00");
+    expect(service.listProjects({ mode: "ngo" })).toHaveLength(1);
+    expect(service.listProjects({ mode: "sme" }).map((x) => x.mode)).toEqual(["sme"]);
+    expect(service.getProject(p.id)!.milestones).toHaveLength(4);
+  });
+
+  it("shows donors only paid milestones, with proof, and no private fields", async () => {
+    const project = service.getProject(ngo().id)!;
+    const [first, second] = project.milestones;
+    await service.submitProof(first.id, png, owner);
+    await service.approveRelease(first.id, owner);
+    verifier.willReturn({ recommendation: "hold" });
+    await service.submitProof(second.id, { data: new Uint8Array([9, 9, 9]), mediaType: "image/png" }, owner);
+
+    const impact = service.getImpact(project.id)!;
+    expect(impact.name).toBe(project.name);
+    expect(impact.fund).toMatchObject({ budget: "5000.00", released: first.amount });
+    expect(impact.paid).toHaveLength(1);
+    expect(impact.paid[0]).toMatchObject({ title: first.title, partner: first.payeeName, amount: first.amount });
+    expect(impact.paid[0].proof).toHaveLength(1);
+    expect(impact.paid[0].paidAt).toBeTruthy();
+    const json = JSON.stringify(impact);
+    for (const secret of ["payee@example.com", "verification", "reasons", "history", "BATCH", PASSCODE, owner]) {
+      expect(json).not.toContain(secret);
+    }
+  });
+
+  it("lists relief supplies that were ordered", async () => {
+    const id = ngo().id;
+    const p = await service.requestMaterials(id, "Buy 40 m2 of tarpaulin, max 1,300 SGD, within 5 days", owner);
+    await service.approveQuote(p.id, owner);
+    const impact = service.getImpact(id)!;
+    expect(impact.supplies).toHaveLength(1);
+    expect(impact.supplies[0]).toMatchObject({ quantity: 40, supplierName: p.recommendation!.supplierName });
+  });
+
+  it("has no public impact page for SME projects", () => {
+    expect(service.getImpact(service.listProjects({ mode: "sme" })[0].id)).toBeUndefined();
+  });
+
+  it("restores the NGO project on reset", async () => {
+    const m = service.getProject(ngo().id)!.milestones[0];
+    await service.submitProof(m.id, png, owner);
+    await service.approveRelease(m.id, owner);
+    service.resetDemo(owner);
+    expect(ngo().fund.released).toBe("0.00");
   });
 });

@@ -92,7 +92,25 @@ export type PurchaseOrder = {
   orderedAt: string | null;
 };
 
-export type ProjectSummary = { id: number; name: string; fund: Fund };
+export type Mode = "sme" | "ngo";
+
+export type ProjectSummary = { id: number; name: string; mode: Mode; fund: Fund };
+
+/** Public donor view of an NGO project. Only what was paid, never emails, AI output or audit detail. */
+export type ImpactView = {
+  id: number;
+  name: string;
+  fund: Pick<Fund, "budget" | "released" | "currency">;
+  paid: { title: string; description: string; partner: string; amount: string; paidAt: string; proof: ProofImage[] }[];
+  supplies: {
+    item: string;
+    quantity: number;
+    unit: string;
+    supplierName: string;
+    total: string;
+    expectedBy: string | null;
+  }[];
+};
 
 /** The verifier's output after ProofPay's hard rules are applied. */
 export type Assessment = Verification & {
@@ -108,6 +126,7 @@ export type MilestoneView = {
   id: number;
   projectId: number;
   projectName: string;
+  projectMode: Mode;
   title: string;
   description: string;
   amount: string;
@@ -196,6 +215,7 @@ const ALLOWED_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 type ProjectRow = {
   id: number;
   name: string;
+  mode: Mode;
   budget_minor: number;
   currency: string;
   released_minor: number;
@@ -206,6 +226,7 @@ type MilestoneRow = {
   id: number;
   project_id: number;
   project_name: string;
+  project_mode: Mode;
   title: string;
   description: string;
   amount_minor: number;
@@ -224,7 +245,7 @@ type MilestoneRow = {
 type FileRow = { role: "invoice" | "photo"; mime: string; data: string };
 
 const PROJECT_SQL = `
-  SELECT p.id, p.name, p.budget_minor, p.currency,
+  SELECT p.id, p.name, p.mode, p.budget_minor, p.currency,
          COALESCE((SELECT SUM(amount_minor) FROM milestone m WHERE m.project_id = p.id AND m.status = 'paid'), 0)
            + COALESCE((SELECT SUM(order_total_minor) FROM purchase o WHERE o.project_id = p.id AND o.order_status = 'ordered'), 0) AS released_minor,
          COALESCE((SELECT SUM(amount_minor) FROM milestone m WHERE m.project_id = p.id AND m.status = 'approved'), 0)
@@ -232,13 +253,14 @@ const PROJECT_SQL = `
   FROM project p`;
 
 const MILESTONE_SQL = `
-  SELECT m.*, p.name AS project_name, p.currency
+  SELECT m.*, p.name AS project_name, p.mode AS project_mode, p.currency
   FROM milestone m JOIN project p ON p.id = m.project_id`;
 
 function toSummary(r: ProjectRow): ProjectSummary {
   return {
     id: r.id,
     name: r.name,
+    mode: r.mode,
     fund: {
       budget: formatMinor(r.budget_minor),
       released: formatMinor(r.released_minor),
@@ -255,6 +277,7 @@ function toMilestone(r: MilestoneRow, files: FileRow[], history: AuditEntry[]): 
     id: r.id,
     projectId: r.project_id,
     projectName: r.project_name,
+    projectMode: r.project_mode,
     title: r.title,
     description: r.description,
     amount: formatMinor(r.amount_minor),
@@ -523,7 +546,9 @@ export function createService({
                 ? {
                     carrier: r.tracking_carrier,
                     number: r.tracking_number,
-                    expectedBy: new Date(Date.parse(r.ordered_at) + winner.leadDays * 86400000).toISOString().slice(0, 10),
+                    expectedBy: new Date(Date.parse(r.ordered_at) + winner.leadDays * 86400000)
+                      .toISOString()
+                      .slice(0, 10),
                   }
                 : null,
             orderedAt: r.ordered_at,
@@ -782,18 +807,23 @@ export function createService({
       const row = db.prepare(`${MILESTONE_SQL} WHERE m.payout_batch_id = ?`).get(payout.batchId) as
         MilestoneRow | undefined;
       if (!row) {
-        const order = db.prepare(`SELECT id, payout_status FROM purchase WHERE payout_batch_id = ?`).get(payout.batchId) as
-          | { id: number; payout_status: string | null }
-          | undefined;
+        const order = db
+          .prepare(`SELECT id, payout_status FROM purchase WHERE payout_batch_id = ?`)
+          .get(payout.batchId) as { id: number; payout_status: string | null } | undefined;
         if (!order) return { result: "ignored", reason: `no milestone or order for batch ${payout.batchId}` };
         const next = nextPayoutStatus(order.payout_status, payout.status);
-        if (!next.apply) return { result: "ignored", reason: `${payout.status} does not move ${order.payout_status} forward` };
+        if (!next.apply)
+          return { result: "ignored", reason: `${payout.status} does not move ${order.payout_status} forward` };
         db.prepare(`UPDATE purchase SET payout_status = ?, order_status = ? WHERE id = ?`).run(
           payout.status,
           next.failed ? "order_failed" : "ordered",
           order.id,
         );
-        auditPurchase(order.id, "payout_status", `batch ${payout.batchId}: ${payout.status} (webhook ${event.event_type})`);
+        auditPurchase(
+          order.id,
+          "payout_status",
+          `batch ${payout.batchId}: ${payout.status} (webhook ${event.event_type})`,
+        );
         return { result: "applied", reason: `order ${order.id} ${payout.batchId}: ${payout.status}` };
       }
       return applyPayoutStatus(row, payout.status, `webhook ${event.event_type}`)
@@ -801,8 +831,60 @@ export function createService({
         : { result: "ignored", reason: `${payout.status} does not move ${row.payout_status} forward` };
     },
 
-    listProjects(): ProjectSummary[] {
-      return (db.prepare(`${PROJECT_SQL} ORDER BY p.id`).all() as ProjectRow[]).map(toSummary);
+    listProjects(filter: { mode?: Mode } = {}): ProjectSummary[] {
+      const rows = db.prepare(`${PROJECT_SQL} ORDER BY p.id`).all() as ProjectRow[];
+      return rows.filter((r) => !filter.mode || r.mode === filter.mode).map(toSummary);
+    },
+
+    /** Public, no credential: what an NGO project's donations paid for. */
+    getImpact(projectId: number): ImpactView | undefined {
+      const p = project(projectId);
+      if (!p || p.mode !== "ngo") return undefined;
+      const paid = (
+        db
+          .prepare(
+            `SELECT m.id, m.title, m.description, m.payee_name, m.amount_minor,
+                    (SELECT at FROM audit a WHERE a.milestone_id = m.id AND a.kind = 'payout_sent' ORDER BY a.id DESC LIMIT 1) AS paid_at
+             FROM milestone m WHERE m.project_id = ? AND m.status = 'paid' ORDER BY m.position`,
+          )
+          .all(projectId) as {
+          id: number;
+          title: string;
+          description: string;
+          payee_name: string;
+          amount_minor: number;
+          paid_at: string | null;
+        }[]
+      ).map((m) => ({
+        title: m.title,
+        description: m.description,
+        partner: m.payee_name,
+        amount: formatMinor(m.amount_minor),
+        paidAt: m.paid_at ?? "",
+        proof: currentFiles(m.id).map((f) => ({ image: f.data, mime: f.mime })),
+      }));
+      const supplies = (
+        db
+          .prepare(`SELECT id FROM purchase WHERE project_id = ? AND order_status = 'ordered' ORDER BY id`)
+          .all(projectId) as { id: number }[]
+      )
+        .map((r) => getPurchase(r.id)!)
+        .map((o) => ({
+          item: o.item,
+          quantity: o.quantity,
+          unit: o.unit,
+          supplierName: o.order!.supplierName,
+          total: o.order!.total,
+          expectedBy: o.order!.tracking?.expectedBy ?? null,
+        }));
+      const s = toSummary(p);
+      return {
+        id: p.id,
+        name: p.name,
+        fund: { budget: s.fund.budget, released: s.fund.released, currency: s.fund.currency },
+        paid,
+        supplies,
+      };
     },
 
     getProject(id: number): ProjectView | undefined {
@@ -890,10 +972,13 @@ export function createService({
       }
 
       const desk = new SupplierDesk({ referenceUnitMinor: choice.unitPriceMinor, quantity: req.quantity });
-      const result = await negotiator.negotiate({ ...req, referenceUnitMinor: choice.unitPriceMinor }, {
-        suppliers: desk.suppliers.map((s) => ({ id: s.id, name: s.name })),
-        requestQuote: (id, counter) => desk.ask(id, counter === undefined ? undefined : Math.round(counter)),
-      });
+      const result = await negotiator.negotiate(
+        { ...req, referenceUnitMinor: choice.unitPriceMinor },
+        {
+          suppliers: desk.suppliers.map((s) => ({ id: s.id, name: s.name })),
+          requestQuote: (id, counter) => desk.ask(id, counter === undefined ? undefined : Math.round(counter)),
+        },
+      );
       assertSameEpoch(started);
 
       const limits = { budgetMinor: req.budgetMinor, deadlineDays: req.deadlineDays };
@@ -976,7 +1061,8 @@ export function createService({
       requireOwner(credential);
       const view = getPurchase(purchaseId);
       if (!view) throw new Error(`Purchase ${purchaseId} not found`);
-      if (view.order?.status === "ordered" || view.order?.status === "ordering") throw new Error("This purchase is already ordered");
+      if (view.order?.status === "ordered" || view.order?.status === "ordering")
+        throw new Error("This purchase is already ordered");
       if (!view.recommendation) throw new Error("No supplier fits this request, so there is nothing to order");
       const win = view.rows.find((r) => r.supplierId === view.recommendation!.supplierId)!;
       const totalMinor = Math.round(win.total * 100);
@@ -989,7 +1075,8 @@ export function createService({
         order_attempts: number;
         order_request_id: string | null;
       };
-      const requestId = prev.order_request_id ?? `proofpay-${started.slice(0, 12)}-o${purchaseId}-a${prev.order_attempts + 1}`;
+      const requestId =
+        prev.order_request_id ?? `proofpay-${started.slice(0, 12)}-o${purchaseId}-a${prev.order_attempts + 1}`;
       const { changes } = db
         .prepare(
           `UPDATE purchase SET order_status = 'ordering', order_total_minor = ?, order_attempts = order_attempts + 1,
@@ -997,7 +1084,11 @@ export function createService({
         )
         .run(totalMinor, requestId, purchaseId);
       if (changes === 0) throw new Error("This purchase is already ordered");
-      auditPurchase(purchaseId, "approved", `owner approved ${win.supplierName} at ${formatMinor(totalMinor)} ${view.currency}`);
+      auditPurchase(
+        purchaseId,
+        "approved",
+        `owner approved ${win.supplierName} at ${formatMinor(totalMinor)} ${view.currency}`,
+      );
 
       const note = `${p.name}: ${view.quantity} ${view.unit} ${view.item} from ${win.supplierName}`;
       let batchId: string;
@@ -1021,11 +1112,9 @@ export function createService({
         assertSameEpoch(started);
         const message = err instanceof Error ? err.message : String(err);
         const definite = err instanceof PayoutRejected;
-        db.prepare(`UPDATE purchase SET order_status = 'order_failed', order_error = ?, order_request_id = ? WHERE id = ?`).run(
-          message,
-          definite ? null : requestId,
-          purchaseId,
-        );
+        db.prepare(
+          `UPDATE purchase SET order_status = 'order_failed', order_error = ?, order_request_id = ? WHERE id = ?`,
+        ).run(message, definite ? null : requestId, purchaseId);
         auditPurchase(purchaseId, "payout_failed", message);
         return getPurchase(purchaseId)!;
       }
@@ -1048,7 +1137,11 @@ export function createService({
           view.currency,
           `Paid by ProofPay through PayPal Payouts batch ${batchId}`,
         );
-        db.prepare(`UPDATE purchase SET invoice_id = ?, invoice_status = ? WHERE id = ?`).run(inv.invoiceId, status, purchaseId);
+        db.prepare(`UPDATE purchase SET invoice_id = ?, invoice_status = ? WHERE id = ?`).run(
+          inv.invoiceId,
+          status,
+          purchaseId,
+        );
         auditPurchase(purchaseId, "invoice", `PayPal invoice ${inv.invoiceId}: ${status}`);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

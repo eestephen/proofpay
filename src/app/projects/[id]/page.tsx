@@ -10,6 +10,7 @@ import { FundSummary } from "../../fund-summary";
 import { MilestoneGrid } from "./milestone-grid";
 import { NegotiateButton } from "./negotiate-button";
 import { QuotesGrid } from "./quotes-grid";
+import { WORDS } from "../../words";
 
 type Props = {
   params: Promise<{ id: string }>;
@@ -38,13 +39,21 @@ async function Project({ params, searchParams }: Props) {
   const { error } = await searchParams;
   return (
     <>
-      <h1 className="mb-4 mt-2 text-2xl font-bold">{board.name}</h1>
+      <p className="mt-2 text-xs uppercase tracking-wide text-gray-500">{WORDS[board.mode].mode} mode</p>
+      <h1 className="mb-4 text-2xl font-bold">{board.name}</h1>
+      {board.mode === "ngo" && (
+        <Link className="mb-4 inline-block text-sm underline" href={`/impact/${board.id}`}>
+          Public donor impact page →
+        </Link>
+      )}
       <FundSummary fund={board.fund} />
       <h2 className="mb-2 mt-6 font-semibold">Milestones</h2>
       <MilestoneGrid rows={board.rows} />
       <p className="mt-2 text-sm text-gray-500">Click a column header to sort, the menu to filter, a row to open it.</p>
 
-      <h2 className="mb-2 mt-10 text-xl font-semibold">Buy materials</h2>
+      <h2 className="mb-2 mt-10 text-xl font-semibold">
+        {board.mode === "ngo" ? "Buy relief supplies" : "Buy materials"}
+      </h2>
       <p className="mb-3 text-sm text-gray-600">
         The buyer agent looks up a real market price (Channel3), asks three suppliers for quotes and negotiates up to
         three rounds each. It cannot buy or pay: you approve the purchase.
@@ -59,7 +68,11 @@ async function Project({ params, searchParams }: Props) {
           <input name="projectId" type="hidden" value={board.id} />
           <textarea
             className="w-full rounded border p-3"
-            defaultValue="Buy 40 m2 of porcelain floor tiles for the kitchen, max 2,000 SGD, delivered within 5 days"
+            defaultValue={
+              board.mode === "ngo"
+                ? "Buy 60 gravity water filters, max 3,000 SGD, delivered within 4 days"
+                : "Buy 40 m2 of porcelain floor tiles for the kitchen, max 2,000 SGD, delivered within 5 days"
+            }
             maxLength={500}
             name="request"
             required
@@ -68,7 +81,9 @@ async function Project({ params, searchParams }: Props) {
           <NegotiateButton />
         </form>
       ) : (
-        <p className="mb-6 rounded bg-gray-100 p-3 text-sm">Sign in as owner to ask the buyer agent.</p>
+        <p className="mb-6 rounded bg-gray-100 p-3 text-sm">
+          Sign in as {WORDS[board.mode].owner.toLowerCase()} to ask the buyer agent.
+        </p>
       )}
       {purchases.map((p) => (
         <Purchase key={p.id} owner={owner} p={p} />
