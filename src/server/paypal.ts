@@ -1,5 +1,4 @@
-import type { PayPalPort } from "./ports";
-import { randomUUID } from "node:crypto";
+import { PayoutRejected, type PayPalPort } from "./ports";
 
 const BASE =
   process.env.PAYPAL_ENVIRONMENT === "PRODUCTION"
@@ -40,7 +39,7 @@ export async function createPayout(input: {
     },
     body: JSON.stringify({
       sender_batch_header: {
-        sender_batch_id: `${input.requestId}-${randomUUID()}`,
+        sender_batch_id: input.requestId,
         email_subject: "ProofPay: milestone payment released",
       },
       items: [
@@ -54,7 +53,11 @@ export async function createPayout(input: {
       ],
     }),
   });
-  if (!res.ok) throw new Error(`PayPal payout failed: ${res.status} ${await res.text()}`);
+  if (!res.ok) {
+    const message = `PayPal payout failed: ${res.status} ${await res.text()}`;
+    // 4xx: PayPal rejected it and created nothing. 5xx: unclear, retry with the same id.
+    throw res.status >= 400 && res.status < 500 ? new PayoutRejected(message) : new Error(message);
+  }
   const body = (await res.json()) as {
     batch_header: { payout_batch_id: string; batch_status: string };
   };

@@ -1,7 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { checkRelease, formatMinor, parseAmountMinor, type MilestoneStatus } from "@/domain/release";
-import type { PayPalPort, ProofFile, VerifierPort } from "./ports";
+import { PayoutRejected, type PayPalPort, type ProofFile, type VerifierPort } from "./ports";
 import { seedStore, type SeedOptions } from "./store";
 import type { Verification } from "./verify";
 
@@ -43,6 +43,7 @@ export type MilestoneView = {
 export type AuditKind =
   | "proof_submitted"
   | "verified"
+  | "verification_failed"
   | "override"
   | "approved"
   | "payout_sent"
@@ -62,7 +63,14 @@ export type Deps = {
   ownerPasscode: string | undefined;
   /** Signs owner sessions and payee links. */
   secret: string;
+  /** Clock, for session expiry. */
+  now?: () => number;
 };
+
+export const OWNER_SESSION_MS = 12 * 60 * 60 * 1000;
+
+/** PayPal batch statuses that mean the money did not go out. */
+const FAILED_BATCH = new Set(["DENIED", "FAILED", "CANCELED"]);
 
 /** What a payee sees through their upload link: no audit trail. */
 export type PayeeView = Omit<MilestoneView, "history">;
@@ -98,6 +106,7 @@ type MilestoneRow = {
   payout_batch_id: string | null;
   payout_status: string | null;
   payout_attempts: number;
+  payout_request_id: string | null;
   payout_error: string | null;
 };
 
@@ -166,12 +175,27 @@ function validateProof(files: ProofFile[]) {
   }
 }
 
-export function createService({ db, seed, paypal, verifier, ownerPasscode, secret }: Deps) {
+export function createService({ db, seed, paypal, verifier, ownerPasscode, secret, now = Date.now }: Deps) {
   const sign = (value: string) => createHmac("sha256", secret).update(value).digest("base64url");
-  const ownerToken = sign("owner");
+  // Bound to the passcode, so changing the passcode signs everyone out.
+  const ownerSig = (issuedAt: number) => sign(`owner:${ownerPasscode}:${issuedAt}`);
 
   function isOwner(credential: Credential): boolean {
-    return typeof credential === "string" && safeEqual(credential, ownerToken);
+    if (!ownerPasscode || typeof credential !== "string") return false;
+    const [issued, sig] = credential.split(".");
+    const issuedAt = Number(issued);
+    if (!Number.isSafeInteger(issuedAt) || !sig || !safeEqual(sig, ownerSig(issuedAt))) return false;
+    const age = now() - issuedAt;
+    return age >= 0 && age <= OWNER_SESSION_MS;
+  }
+
+  function epoch(): string {
+    return (db.prepare(`SELECT value FROM meta WHERE key = 'epoch'`).get() as { value: string }).value;
+  }
+
+  /** Throws if a demo reset happened while an AI or PayPal call was in flight. */
+  function assertSameEpoch(started: string) {
+    if (epoch() !== started) throw new Error("The demo was reset while this was in progress; nothing was saved");
   }
 
   function requireOwner(credential: Credential) {
@@ -179,8 +203,7 @@ export function createService({ db, seed, paypal, verifier, ownerPasscode, secre
   }
 
   function payeeTokenFor(milestoneId: number): string {
-    const { value: epoch } = db.prepare(`SELECT value FROM meta WHERE key = 'epoch'`).get() as { value: string };
-    return sign(`payee:${epoch}:${milestoneId}`);
+    return sign(`payee:${epoch()}:${milestoneId}`);
   }
 
   function isPayee(milestoneId: number, credential: Credential): boolean {
@@ -240,13 +263,17 @@ export function createService({ db, seed, paypal, verifier, ownerPasscode, secre
   /** Hard rules run after the AI. Any finding forces a hold, whatever the AI said. */
   function assess(row: MilestoneRow, v: Verification, hashes: string[]): Assessment {
     const flags: string[] = [];
+    const label = (i: number) => (i === 0 ? "The invoice" : `Work photo ${i}`);
     hashes.forEach((hash, i) => {
+      const first = hashes.indexOf(hash);
+      if (first < i) flags.push(`${label(i)} is the same file as ${label(first).toLowerCase()}`);
       const title = usedElsewhere(hash, row.id);
-      const label = i === 0 ? "The invoice" : `Work photo ${i}`;
-      if (title) flags.push(`${label} was already submitted as proof for "${title}"`);
+      if (title) flags.push(`${label(i)} was already submitted as proof for "${title}"`);
     });
     const totalMinor = parseAmountMinor(v.extractedTotal);
-    if (totalMinor !== null && totalMinor > row.amount_minor) {
+    if (totalMinor === null) {
+      flags.push("Could not read a total from the invoice, so the amount cannot be checked");
+    } else if (totalMinor > row.amount_minor) {
       flags.push(
         `Document total ${v.extractedTotal} is above the milestone amount ${formatMinor(row.amount_minor)} ${row.currency}`,
       );
@@ -265,8 +292,9 @@ export function createService({ db, seed, paypal, verifier, ownerPasscode, secre
 
   return {
     ownerSession(passcode: string): string | null {
-      if (!ownerPasscode) return null;
-      return safeEqual(passcode, ownerPasscode) ? ownerToken : null;
+      if (!ownerPasscode || !safeEqual(passcode, ownerPasscode)) return null;
+      const issuedAt = now();
+      return `${issuedAt}.${ownerSig(issuedAt)}`;
     },
 
     isOwner,
@@ -300,6 +328,7 @@ export function createService({ db, seed, paypal, verifier, ownerPasscode, secre
       validateProof(files);
       const row = mustGet(id);
       const previous = row.status;
+      const started = epoch();
       const { changes } = db
         .prepare(`UPDATE milestone SET status = 'under_review' WHERE id = ? AND status IN ('awaiting_proof', 'on_hold')`)
         .run(id);
@@ -319,10 +348,13 @@ export function createService({ db, seed, paypal, verifier, ownerPasscode, secre
           files,
         );
       } catch (err) {
+        assertSameEpoch(started);
         // Leave the milestone where it was so proof can be retried.
         db.prepare(`UPDATE milestone SET status = ? WHERE id = ?`).run(previous, id);
+        audit(id, "verification_failed", err instanceof Error ? err.message : String(err));
         throw err;
       }
+      assertSameEpoch(started);
 
       const hashes = files.map((f) => sha256(f.data));
       const assessment = assess(row, verification, hashes);
@@ -360,12 +392,15 @@ export function createService({ db, seed, paypal, verifier, ownerPasscode, secre
       if (!check.ok) throw new Error(`Release refused: ${check.reason}`);
       const fromStatuses = override ? "('on_hold')" : "('ready', 'payout_failed')";
       // Conditional update: only one caller can move the milestone to approved.
+      // After an unclear failure PayPal may have created the batch, so reuse its request id.
+      const started = epoch();
+      const requestId = row.payout_request_id ?? `proofpay-${started.slice(0, 12)}-m${id}-a${row.payout_attempts + 1}`;
       const { changes } = db
         .prepare(
-          `UPDATE milestone SET status = 'approved', payout_attempts = payout_attempts + 1
+          `UPDATE milestone SET status = 'approved', payout_attempts = payout_attempts + 1, payout_request_id = ?
            WHERE id = ? AND status IN ${fromStatuses}`,
         )
-        .run(id);
+        .run(requestId, id);
       if (changes === 0) throw new Error("Release refused: not_ready");
       if (override) {
         const reasons = row.verification ? (JSON.parse(row.verification) as Assessment).reasons.join("; ") : "";
@@ -376,29 +411,43 @@ export function createService({ db, seed, paypal, verifier, ownerPasscode, secre
 
       try {
         const payout = await paypal.createPayout({
-          requestId: `proofpay-milestone-${id}-attempt-${attempt}`,
+          requestId,
           receiverEmail: row.payee_email,
           amount: formatMinor(row.amount_minor),
           currency: row.currency,
           note: `${row.project_name}: ${row.title}`,
         });
+        assertSameEpoch(started);
         db.prepare(
           `UPDATE milestone SET status = 'paid', payout_batch_id = ?, payout_status = ?, payout_error = NULL WHERE id = ?`,
         ).run(payout.batchId, payout.status, id);
         audit(id, "payout_sent", `batch ${payout.batchId}: ${payout.status}`);
       } catch (err) {
+        assertSameEpoch(started);
         const message = err instanceof Error ? err.message : String(err);
-        db.prepare(`UPDATE milestone SET status = 'payout_failed', payout_error = ? WHERE id = ?`).run(message, id);
-        audit(id, "payout_failed", message);
+        const definite = err instanceof PayoutRejected;
+        db.prepare(
+          `UPDATE milestone SET status = 'payout_failed', payout_error = ?, payout_request_id = ? WHERE id = ?`,
+        ).run(message, definite ? null : requestId, id);
+        audit(id, "payout_failed", `${definite ? "rejected" : "unclear, retry reuses the same request id"}: ${message}`);
       }
       return view(id);
     },
 
-    async refreshPayout(id: number): Promise<MilestoneView> {
+    async refreshPayout(id: number, credential: Credential): Promise<MilestoneView> {
+      requireOwner(credential);
       const row = mustGet(id);
-      if (row.payout_batch_id) {
+      if (row.payout_batch_id && row.status === "paid") {
+        const started = epoch();
         const status = await paypal.getPayoutStatus(row.payout_batch_id);
-        if (status !== row.payout_status) {
+        assertSameEpoch(started);
+        if (FAILED_BATCH.has(status)) {
+          // The money did not go out: back to payout_failed, out of the released total, retryable.
+          db.prepare(
+            `UPDATE milestone SET status = 'payout_failed', payout_status = ?, payout_error = ?, payout_request_id = NULL WHERE id = ?`,
+          ).run(status, `PayPal batch ${row.payout_batch_id} ended ${status}`, id);
+          audit(id, "payout_failed", `batch ${row.payout_batch_id}: ${status}`);
+        } else if (status !== row.payout_status) {
           db.prepare(`UPDATE milestone SET payout_status = ? WHERE id = ?`).run(status, id);
           audit(id, "payout_status", `batch ${row.payout_batch_id}: ${status}`);
         }

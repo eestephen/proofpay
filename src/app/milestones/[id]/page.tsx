@@ -50,7 +50,8 @@ async function MilestoneCard({ params, searchParams }: Props) {
             <b>
               {m.amount} {m.currency}
             </b>{" "}
-            to {m.payeeName} ({m.payeeEmail}) · status: <code>{m.status}</code>
+            to {m.payeeName}
+            {owner && ` (${m.payeeEmail})`} · status: <code>{m.status}</code>
           </p>
         </div>
 
@@ -163,17 +164,19 @@ async function MilestoneCard({ params, searchParams }: Props) {
             <p>
               PayPal payout batch <code>{m.payout.batchId}</code>: <b>{m.payout.status}</b>
             </p>
-            <form action={refreshPayout}>
-              {idField}
-              <button className="mt-2 underline" type="submit">
-                Refresh status from PayPal
-              </button>
-            </form>
+            {owner && (
+              <form action={refreshPayout}>
+                {idField}
+                <button className="mt-2 underline" type="submit">
+                  Refresh status from PayPal
+                </button>
+              </form>
+            )}
           </div>
         )}
       </section>
 
-      {m.history.length > 0 && (
+      {owner && m.history.length > 0 && (
         <section className="mt-6">
           <h2 className="mb-2 font-semibold">Audit trail</h2>
           <ol className="space-y-1 text-sm">

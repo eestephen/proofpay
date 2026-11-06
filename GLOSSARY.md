@@ -10,6 +10,10 @@
 | **Supplier** | A business that sells goods to the project. It is paid for an order, not for a milestone. | vendor, merchant |
 | **Proof** | The evidence a payee submits for a milestone: photos, an invoice or receipt, a note. | evidence pack, upload |
 | **Verification** | The AI verifier's check of proof against its milestone. It produces a recommendation and reasons. | approval |
+| **Payee link** | The private link a payee uses to submit proof and see status for one milestone. Stops working after a demo reset. | upload link |
+| **Hard rule** | A deterministic check ProofPay runs after the AI: total above the milestone amount, unreadable total, a file reused on another milestone or repeated in one submission, instructions aimed at the reviewer. Any hit forces `hold`. Shown as "Fraud check" in the UI. | flag (in prose) |
+| **Assessment** | The stored result of verification: the AI output plus hard-rule findings and the final recommendation. | verdict |
+| **Override** | The owner releasing a milestone that is on hold, after ticking an explicit confirmation. Always audited. | force release |
 | **Recommendation** | The verifier's output: `release` or `hold`. Advice only; it never moves money. | decision |
 | **Approval** | The owner's explicit go-ahead for a release. Required before any payout. | sign-off, verification |
 | **Release** | Paying out a milestone's amount to its payee through PayPal Payouts, after approval. | disburse, transfer |

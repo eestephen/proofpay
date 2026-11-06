@@ -15,6 +15,13 @@ export interface VerifierPort {
   verify(milestone: VerifierInput, images: ProofFile[]): Promise<Verification>;
 }
 
+/**
+ * PayPal definitely rejected the payout (a 4xx), so nothing was created and a
+ * retry may use a new request id. Any other error is unclear: PayPal may have
+ * created the batch, so a retry must reuse the same request id.
+ */
+export class PayoutRejected extends Error {}
+
 export interface PayPalPort {
   createPayout(input: {
     requestId: string;

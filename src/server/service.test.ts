@@ -125,7 +125,7 @@ describe("refreshing payout status", () => {
     await service.submitProof(tilingId, png, owner);
     await service.approveRelease(tilingId, owner);
     paypal.setStatus("BATCH1", "SUCCESS");
-    const m = await service.refreshPayout(tilingId);
+    const m = await service.refreshPayout(tilingId, owner);
     expect(m.payout).toEqual({ batchId: "BATCH1", status: "SUCCESS" });
   });
 });
@@ -175,7 +175,7 @@ describe("safe release (ticket 04)", () => {
     await service.approveRelease(tilingId, owner);
     await service.approveRelease(tilingId, owner);
     paypal.setStatus("BATCH2", "SUCCESS");
-    const m = await service.refreshPayout(tilingId);
+    const m = await service.refreshPayout(tilingId, owner);
     expect(m.history.map((h) => h.kind)).toEqual([
       "payout_status",
       "payout_sent",
@@ -359,5 +359,93 @@ describe("fraud catches (ticket 03)", () => {
     verifier.willReturn({ recommendation: "hold" });
     await service.submitProof(tilingId, png, token);
     await expect(service.approveRelease(tilingId, token, { override: true })).rejects.toThrow(/Owner passcode/);
+  });
+});
+
+describe("review fixes", () => {
+  it("retries an unclear payout failure with the same request id so PayPal cannot pay twice", async () => {
+    await service.submitProof(tilingId, png, owner);
+    paypal.failNext("network timeout", { definite: false });
+    await service.approveRelease(tilingId, owner);
+    await service.approveRelease(tilingId, owner);
+    expect(paypal.payouts[0].requestId).toBe(paypal.payouts[1].requestId);
+  });
+
+  it("uses different request ids after a demo reset", async () => {
+    const before = service.getMilestone(tilingId)!;
+    await service.submitProof(tilingId, png, owner);
+    await service.approveRelease(tilingId, owner);
+    service.resetDemo(owner);
+    const id = service.getProject(service.listProjects()[0].id)!.milestones[1].id;
+    await service.submitProof(id, png, owner);
+    await service.approveRelease(id, owner);
+    expect(before.title).toBe("Stage 2: Wall and floor tiling");
+    expect(paypal.payouts[0].requestId).not.toBe(paypal.payouts[1].requestId);
+  });
+
+  it("moves a payout PayPal later denies back to payout_failed and restores the fund", async () => {
+    await service.submitProof(tilingId, png, owner);
+    await service.approveRelease(tilingId, owner);
+    paypal.setStatus("BATCH1", "DENIED");
+    const m = await service.refreshPayout(tilingId, owner);
+    expect(m.status).toBe("payout_failed");
+    expect(m.payoutError).toMatch(/DENIED/);
+    expect(service.listProjects()[0].fund).toMatchObject({ released: "0.00", remaining: "8000.00" });
+  });
+
+  it("only lets the owner refresh payout status", async () => {
+    await expect(service.refreshPayout(tilingId, undefined)).rejects.toThrow(/Owner passcode required/);
+  });
+
+  it("drops a verification result that arrives after a demo reset", async () => {
+    const resume = verifier.pause();
+    const pending = service.submitProof(tilingId, png, owner);
+    service.resetDemo(owner);
+    resume();
+    await expect(pending).rejects.toThrow(/reset/);
+    const fresh = service.getProject(service.listProjects()[0].id)!.milestones[1];
+    expect(fresh.status).toBe("awaiting_proof");
+    expect(fresh.proof).toBeNull();
+  });
+
+  it("expires owner sessions after 12 hours", () => {
+    let now = Date.UTC(2026, 10, 6);
+    const seed = { currency: "SGD", payeeEmail: "p@example.com" };
+    const svc = createService({
+      db: openStore(":memory:", seed),
+      seed,
+      paypal: fakePayPal().port,
+      verifier: fakeVerifier().port,
+      ownerPasscode: "pw",
+      secret: "s",
+      now: () => now,
+    });
+    const token = svc.ownerSession("pw")!;
+    expect(svc.isOwner(token)).toBe(true);
+    now += 12 * 60 * 60 * 1000 + 1;
+    expect(svc.isOwner(token)).toBe(false);
+    expect(svc.isOwner(token.replace(/^\d+/, String(now + 1000)))).toBe(false);
+  });
+
+  it("holds an invoice whose total cannot be read", async () => {
+    verifier.willReturn({ recommendation: "release", extractedTotal: "unknown" });
+    const m = await service.submitProof(tilingId, png, owner);
+    expect(m.status).toBe("on_hold");
+    expect(m.verification?.reasons[0]).toMatch(/Could not read a total/);
+  });
+
+  it("holds a submission that repeats the same file", async () => {
+    const m = await service.submitProof(tilingId, [png, png], owner);
+    expect(m.status).toBe("on_hold");
+    expect(m.verification?.reasons[0]).toMatch(/Work photo 1 is the same file as the invoice/);
+  });
+
+  it("records a verifier failure in the audit trail and leaves proof retryable", async () => {
+    verifier.failNext("Gemini down");
+    await expect(service.submitProof(tilingId, png, owner)).rejects.toThrow(/Gemini down/);
+    const m = service.getMilestone(tilingId)!;
+    expect(m.status).toBe("awaiting_proof");
+    expect(m.history[0]).toMatchObject({ kind: "verification_failed" });
+    expect(m.history[0].detail).toMatch(/Gemini down/);
   });
 });

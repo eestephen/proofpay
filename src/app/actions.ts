@@ -65,7 +65,7 @@ export async function overrideRelease(formData: FormData) {
 
 export async function refreshPayout(formData: FormData) {
   const id = milestoneId(formData);
-  await run(`/milestones/${id}`, () => app().refreshPayout(id));
+  await run(`/milestones/${id}`, async () => app().refreshPayout(id, await ownerCredential()));
 }
 
 export async function signIn(formData: FormData) {

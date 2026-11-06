@@ -31,6 +31,7 @@ const SCHEMA = `
     payout_batch_id TEXT,
     payout_status TEXT,
     payout_attempts INTEGER NOT NULL DEFAULT 0,
+    payout_request_id TEXT,
     payout_error TEXT
   );
   CREATE TABLE proof_file (
