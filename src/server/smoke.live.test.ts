@@ -1,27 +1,34 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { getMilestone } from "./db";
-import { createPayout, getPayoutStatus } from "./paypal";
-import { verifyProof } from "./verify";
+import { paypalAdapter } from "./paypal";
+import { createService } from "./service";
+import { openStore } from "./store";
+import { geminiVerifier } from "./verify";
 
-// Live check against real Gemini + PayPal sandbox (sends a 1.00 payout). Run: npm run test:live
-describe("skeleton smoke", () => {
-  it("verifies a real invoice and sends a real sandbox payout", async () => {
-    const m = getMilestone(1)!;
-    const v = await verifyProof(m, {
+// Live check against real Gemini + PayPal sandbox through the app service.
+// Sends a real sandbox payout. Run: npm run test:live
+describe("live: app service with real adapters", () => {
+  it("verifies a real invoice and releases a real sandbox payout", async () => {
+    const service = createService({
+      db: openStore(":memory:", {
+        currency: process.env.PAYOUT_CURRENCY ?? "SGD",
+        payeeEmail: process.env.PAYOUT_RECEIVER_EMAIL ?? "",
+      }),
+      paypal: paypalAdapter,
+      verifier: geminiVerifier,
+    });
+    const tiling = service.getProject(service.listProjects()[0].id)!.milestones[1];
+
+    const verified = await service.submitProof(tiling.id, {
       data: new Uint8Array(readFileSync("demo/invoice-ok.png")),
       mediaType: "image/png",
     });
-    console.log("verification", v);
-    expect(["release", "hold"]).toContain(v.recommendation);
-    const p = await createPayout({
-      milestoneId: 999,
-      receiverEmail: m.payeeEmail,
-      amount: "1.00",
-      currency: m.currency,
-      note: "smoke test",
-    });
-    console.log("payout", p);
-    console.log("status", await getPayoutStatus(p.batchId));
-  }, 120_000);
+    console.log("verification", verified.verification);
+    expect(verified.status).toBe("ready");
+
+    const paid = await service.approveRelease(tiling.id);
+    console.log("payout", paid.payout);
+    expect(paid.status).toBe("paid");
+    expect(paid.payout?.batchId).toBeTruthy();
+  }, 180_000);
 });

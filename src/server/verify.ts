@@ -1,7 +1,7 @@
 import { generateText, Output } from "ai";
 import { google } from "@ai-sdk/google";
 import { z } from "zod";
-import type { Milestone } from "./db";
+import type { ProofFile, VerifierInput, VerifierPort } from "./ports";
 
 export const verificationSchema = z.object({
   recommendation: z.enum(["release", "hold"]),
@@ -17,10 +17,7 @@ const MODELS = (process.env.GEMINI_MODELS ?? "gemini-3.6-flash,gemini-3.5-flash,
   .filter(Boolean);
 
 /** Checks proof against a milestone. Advice only: it cannot move money. */
-export async function verifyProof(
-  milestone: Milestone,
-  image: { data: Uint8Array; mediaType: string },
-): Promise<Verification> {
+export async function verifyProof(milestone: VerifierInput, image: ProofFile): Promise<Verification> {
   let lastError: unknown;
   for (const model of MODELS) {
     try {
@@ -54,3 +51,5 @@ export async function verifyProof(
   }
   throw new Error(`All Gemini models failed. Last error: ${String(lastError)}`);
 }
+
+export const geminiVerifier: VerifierPort = { verify: verifyProof };

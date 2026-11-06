@@ -1,3 +1,4 @@
+import type { PayPalPort } from "./ports";
 import { randomUUID } from "node:crypto";
 
 const BASE =
@@ -23,7 +24,7 @@ async function accessToken(): Promise<string> {
 
 /** Sends one sandbox payout. Never exposed as an AI tool. */
 export async function createPayout(input: {
-  milestoneId: number;
+  requestId: string;
   receiverEmail: string;
   amount: string;
   currency: string;
@@ -35,11 +36,11 @@ export async function createPayout(input: {
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
-      "PayPal-Request-Id": `proofpay-milestone-${input.milestoneId}`,
+      "PayPal-Request-Id": input.requestId,
     },
     body: JSON.stringify({
       sender_batch_header: {
-        sender_batch_id: `milestone-${input.milestoneId}-${randomUUID()}`,
+        sender_batch_id: `${input.requestId}-${randomUUID()}`,
         email_subject: "ProofPay: milestone payment released",
       },
       items: [
@@ -48,7 +49,7 @@ export async function createPayout(input: {
           receiver: input.receiverEmail,
           amount: { value: input.amount, currency: input.currency },
           note: input.note,
-          sender_item_id: `milestone-${input.milestoneId}`,
+          sender_item_id: input.requestId,
         },
       ],
     }),
@@ -69,3 +70,5 @@ export async function getPayoutStatus(batchId: string): Promise<string> {
   const body = (await res.json()) as { batch_header: { batch_status: string } };
   return body.batch_header.batch_status;
 }
+
+export const paypalAdapter: PayPalPort = { createPayout, getPayoutStatus };

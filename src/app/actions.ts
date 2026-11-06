@@ -1,54 +1,32 @@
 "use server";
 
 import { refresh } from "next/cache";
-import { checkRelease } from "@/domain/release";
-import { db, getMilestone } from "@/server/db";
-import { createPayout, getPayoutStatus } from "@/server/paypal";
-import { verifyProof } from "@/server/verify";
+import { app } from "@/server/app";
 
-// Skeleton only: no auth yet. A single seeded milestone, id 1.
+// Thin wrappers: parse input, call the app service. Auth arrives in ticket 02.
+
+function milestoneId(formData: FormData): number {
+  const id = Number(formData.get("milestoneId"));
+  if (!Number.isInteger(id) || id <= 0) throw new Error("Invalid milestone id");
+  return id;
+}
 
 export async function submitProof(formData: FormData) {
   const file = formData.get("proof");
-  if (!(file instanceof File) || file.size === 0) throw new Error("No file uploaded");
-  if (!file.type.startsWith("image/")) throw new Error("Proof must be an image");
-  const milestone = getMilestone(1);
-  if (!milestone) throw new Error("Milestone not found");
-
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const verification = await verifyProof(milestone, { data: bytes, mediaType: file.type });
-
-  db()
-    .prepare(
-      `UPDATE milestone SET status = 'proof_submitted', proof_image = ?, proof_mime = ?, verification = ? WHERE id = 1`,
-    )
-    .run(Buffer.from(bytes).toString("base64"), file.type, JSON.stringify(verification));
-  refresh();
-}
-
-export async function approveRelease() {
-  const milestone = getMilestone(1);
-  if (!milestone) throw new Error("Milestone not found");
-  const check = checkRelease({ status: milestone.status, ownerApproved: true });
-  if (!check.ok) throw new Error(`Release refused: ${check.reason}`);
-
-  const payout = await createPayout({
-    milestoneId: milestone.id,
-    receiverEmail: milestone.payeeEmail,
-    amount: milestone.amount,
-    currency: milestone.currency,
-    note: `${milestone.project}: ${milestone.title}`,
+  if (!(file instanceof File)) throw new Error("No file uploaded");
+  await app().submitProof(milestoneId(formData), {
+    data: new Uint8Array(await file.arrayBuffer()),
+    mediaType: file.type,
   });
-  db()
-    .prepare(`UPDATE milestone SET status = 'paid', payout_batch_id = ?, payout_status = ? WHERE id = 1`)
-    .run(payout.batchId, payout.status);
   refresh();
 }
 
-export async function refreshPayout() {
-  const milestone = getMilestone(1);
-  if (!milestone?.payoutBatchId) return;
-  const status = await getPayoutStatus(milestone.payoutBatchId);
-  db().prepare(`UPDATE milestone SET payout_status = ? WHERE id = 1`).run(status);
+export async function approveRelease(formData: FormData) {
+  await app().approveRelease(milestoneId(formData));
+  refresh();
+}
+
+export async function refreshPayout(formData: FormData) {
+  await app().refreshPayout(milestoneId(formData));
   refresh();
 }
