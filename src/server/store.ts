@@ -64,7 +64,20 @@ const SCHEMA = `
     reasoning TEXT NOT NULL,
     overruled TEXT,
     model TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    order_status TEXT,
+    order_total_minor INTEGER,
+    order_attempts INTEGER NOT NULL DEFAULT 0,
+    order_request_id TEXT,
+    order_error TEXT,
+    payout_batch_id TEXT,
+    payout_status TEXT,
+    invoice_id TEXT,
+    invoice_status TEXT,
+    invoice_error TEXT,
+    tracking_number TEXT,
+    tracking_carrier TEXT,
+    ordered_at TEXT
   );
   CREATE TABLE quote (
     id INTEGER PRIMARY KEY,

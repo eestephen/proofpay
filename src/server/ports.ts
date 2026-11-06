@@ -33,6 +33,19 @@ export interface PayPalPort {
   getPayoutStatus(batchId: string): Promise<string>;
   /** Asks PayPal whether a webhook delivery is genuine. `body` is the raw request body. */
   verifyWebhook(headers: Record<string, string>, body: string): Promise<boolean>;
+  /** A PayPal invoice recording a supplier order. Needs the Invoicing permission on the app. */
+  createPurchaseInvoice(input: {
+    requestId: string;
+    recipientEmail: string;
+    supplierName: string;
+    item: string;
+    quantity: number;
+    unitAmount: string;
+    currency: string;
+    note: string;
+  }): Promise<{ invoiceId: string; status: string }>;
+  /** Marks an invoice paid, e.g. with the Payouts batch that settled it. Returns the new status. */
+  recordInvoicePayment(invoiceId: string, amount: string, currency: string, note: string): Promise<string>;
 }
 
 /** A real product used as the market reference for a purchase. */

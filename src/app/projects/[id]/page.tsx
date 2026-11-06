@@ -5,7 +5,7 @@ import { connection } from "next/server";
 import { app } from "@/server/app";
 import { ownerCredential } from "@/server/session";
 import type { PurchaseView } from "@/server/service";
-import { requestMaterials } from "../../actions";
+import { approveQuote, requestMaterials } from "../../actions";
 import { FundSummary } from "../../fund-summary";
 import { MilestoneGrid } from "./milestone-grid";
 import { NegotiateButton } from "./negotiate-button";
@@ -71,13 +71,13 @@ async function Project({ params, searchParams }: Props) {
         <p className="mb-6 rounded bg-gray-100 p-3 text-sm">Sign in as owner to ask the buyer agent.</p>
       )}
       {purchases.map((p) => (
-        <Purchase key={p.id} p={p} />
+        <Purchase key={p.id} owner={owner} p={p} />
       ))}
     </>
   );
 }
 
-function Purchase({ p }: { p: PurchaseView }) {
+function Purchase({ p, owner }: { p: PurchaseView; owner: boolean }) {
   return (
     <section className="mb-8 rounded-lg border p-4">
       <p className="text-sm text-gray-500">&ldquo;{p.text}&rdquo;</p>
@@ -120,6 +120,17 @@ function Purchase({ p }: { p: PurchaseView }) {
           Agent ({p.model}): {p.reasoning}
         </p>
       </div>
+      {owner && p.recommendation && (!p.order || p.order.status === "order_failed") && (
+        <form action={approveQuote} className="mt-3">
+          <input name="projectId" type="hidden" value={p.projectId} />
+          <input name="purchaseId" type="hidden" value={p.id} />
+          <button className="rounded bg-blue-600 px-4 py-2 text-white" type="submit">
+            {p.order?.status === "order_failed" ? "Retry" : "Approve"}: pay {p.recommendation.supplierName}{" "}
+            {p.recommendation.total.toFixed(2)} {p.currency} via PayPal
+          </button>
+        </form>
+      )}
+      {p.order && <OrderPanel currency={p.currency} order={p.order} />}
       <details className="mt-3 text-sm">
         <summary className="cursor-pointer">Negotiation log ({p.log.length} quotes)</summary>
         <ol className="mt-2 space-y-1">
@@ -133,5 +144,42 @@ function Purchase({ p }: { p: PurchaseView }) {
         </ol>
       </details>
     </section>
+  );
+}
+
+function OrderPanel({ order, currency }: { order: NonNullable<PurchaseView["order"]>; currency: string }) {
+  if (order.status === "order_failed") {
+    return (
+      <div className="mt-3 rounded bg-red-50 p-3 text-sm" role="alert">
+        <p className="font-medium">Supplier payout failed</p>
+        <p className="break-all text-red-800">{order.error}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="mt-3 rounded bg-blue-50 p-3 text-sm">
+      <p className="font-medium">
+        Ordered from {order.supplierName}: {order.total} {currency}
+      </p>
+      <p>
+        PayPal payout batch <code>{order.payoutBatchId}</code>: <b>{order.payoutStatus}</b>
+      </p>
+      <p>
+        PayPal invoice:{" "}
+        {order.invoice.id ? (
+          <>
+            <code>{order.invoice.id}</code> <b>{order.invoice.status}</b>
+          </>
+        ) : (
+          <span className="text-amber-800">not created ({order.invoice.error?.slice(0, 120)})</span>
+        )}
+      </p>
+      {order.tracking && (
+        <p>
+          Shipment: {order.tracking.carrier}, tracking <code>{order.tracking.number}</code>, expected by{" "}
+          {order.tracking.expectedBy}
+        </p>
+      )}
+    </div>
   );
 }

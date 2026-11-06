@@ -666,3 +666,97 @@ describe("buyer agent (ticket 07)", () => {
     expect(t.service.listPurchases(id)).toHaveLength(2);
   });
 });
+
+describe("supplier order (ticket 08)", () => {
+  const ask = "Buy 40 m2 of porcelain floor tiles, max 1,300 SGD, within 5 days";
+  async function quoted(t = make()) {
+    const projectId = t.service.listProjects()[0].id;
+    const p = await t.service.requestMaterials(projectId, ask, t.owner);
+    return { ...t, projectId, p };
+  }
+
+  it("pays the recommended supplier its final total through PayPal and records an invoice and tracking", async () => {
+    const t = await quoted();
+    const o = await t.service.approveQuote(t.p.id, t.owner);
+    const win = t.p.recommendation!;
+    expect(t.paypal.payouts.at(-1)).toMatchObject({
+      receiverEmail: "payee@example.com",
+      amount: win.total.toFixed(2),
+      currency: "SGD",
+    });
+    expect(o.order).toMatchObject({ status: "ordered", supplierName: win.supplierName, payoutBatchId: "BATCH1" });
+    expect(o.order?.invoice).toMatchObject({ id: "INV1", status: "PAID" });
+    expect(t.paypal.invoices[0]).toMatchObject({ recipientEmail: "payee@example.com", quantity: 40 });
+    expect(t.paypal.invoicePayments[0]).toMatchObject({ invoiceId: "INV1", amount: win.total.toFixed(2) });
+    expect(o.order?.tracking?.number).toMatch(/^[A-Z]{2}\d{8}SG$/);
+    expect(t.service.listProjects()[0].fund).toMatchObject({
+      released: win.total.toFixed(2),
+      remaining: (8000 - win.total).toFixed(2),
+    });
+  });
+
+  it("orders a purchase at most once", async () => {
+    const t = await quoted();
+    await t.service.approveQuote(t.p.id, t.owner);
+    await expect(t.service.approveQuote(t.p.id, t.owner)).rejects.toThrow(/already ordered/);
+    expect(t.paypal.payouts).toHaveLength(1);
+  });
+
+  it("refuses a purchase with no supplier that fits", async () => {
+    const t = make();
+    t.negotiator.setRequest({ budgetMinor: 50000 });
+    const { p } = await quoted(t);
+    await expect(t.service.approveQuote(p.id, t.owner)).rejects.toThrow(/No supplier fits/);
+  });
+
+  it("refuses an order larger than the remaining fund", async () => {
+    const t = make({ budgetMinor: 50000 });
+    const { p } = await quoted(t);
+    await expect(t.service.approveQuote(p.id, t.owner)).rejects.toThrow(/insufficient_fund/);
+    expect(t.paypal.payouts).toHaveLength(0);
+  });
+
+  it("is owner only", async () => {
+    const t = await quoted();
+    await expect(t.service.approveQuote(t.p.id, undefined)).rejects.toThrow(/Owner passcode required/);
+  });
+
+  it("still completes the order when PayPal refuses to create the invoice, and says why", async () => {
+    const t = await quoted();
+    t.paypal.failInvoices("NOT_AUTHORIZED");
+    const o = await t.service.approveQuote(t.p.id, t.owner);
+    expect(o.order?.status).toBe("ordered");
+    expect(o.order?.invoice).toMatchObject({ id: null, error: expect.stringMatching(/NOT_AUTHORIZED/) });
+  });
+
+  it("keeps a failed supplier payout retryable and out of the fund", async () => {
+    const t = await quoted();
+    t.paypal.failNext("422 INSUFFICIENT_FUNDS");
+    const o = await t.service.approveQuote(t.p.id, t.owner);
+    expect(o.order?.status).toBe("order_failed");
+    expect(o.order?.error).toMatch(/INSUFFICIENT_FUNDS/);
+    expect(t.service.listProjects()[0].fund).toMatchObject({ released: "0.00", remaining: "8000.00" });
+    expect((await t.service.approveQuote(t.p.id, t.owner)).order?.status).toBe("ordered");
+  });
+
+  it("updates the supplier payout from a PayPal webhook", async () => {
+    const t = await quoted();
+    await t.service.approveQuote(t.p.id, t.owner);
+    const r = await t.service.handleWebhook({
+      headers: {},
+      body: JSON.stringify({
+        id: "WH-PO",
+        event_type: "PAYMENT.PAYOUTS-ITEM.SUCCEEDED",
+        resource: { payout_batch_id: "BATCH1", transaction_status: "SUCCESS" },
+      }),
+    });
+    expect(r.result).toBe("applied");
+    expect(t.service.getPurchase(t.p.id)!.order?.payoutStatus).toBe("SUCCESS");
+  });
+
+  it("shows supplier orders on the project board total", async () => {
+    const t = await quoted();
+    await t.service.approveQuote(t.p.id, t.owner);
+    expect(t.service.getBoard(t.projectId)!.fund.released).toBe(t.p.recommendation!.total.toFixed(2));
+  });
+});

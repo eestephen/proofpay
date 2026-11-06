@@ -52,6 +52,9 @@ export function fakePayPal() {
   const statuses = new Map<string, string>();
   let failure: { message: string; definite: boolean } | null = null;
   let webhooksGenuine = true;
+  let invoiceFailure: string | null = null;
+  const invoices: Parameters<PayPalPort["createPurchaseInvoice"]>[0][] = [];
+  const invoicePayments: { invoiceId: string; amount: string; currency: string; note: string }[] = [];
   let gate: Promise<void> | null = null;
   const port: PayPalPort = {
     async createPayout(input) {
@@ -72,10 +75,25 @@ export function fakePayPal() {
     async verifyWebhook() {
       return webhooksGenuine;
     },
+    async createPurchaseInvoice(input) {
+      if (invoiceFailure) throw new Error(invoiceFailure);
+      invoices.push(input);
+      return { invoiceId: `INV${invoices.length}`, status: "SENT" };
+    },
+    async recordInvoicePayment(invoiceId, amount, currency, note) {
+      invoicePayments.push({ invoiceId, amount, currency, note });
+      return "PAID";
+    },
   };
   return {
     port,
     payouts,
+    invoices,
+    invoicePayments,
+    /** Every invoice call fails with this message from now on. */
+    failInvoices(message: string) {
+      invoiceFailure = message;
+    },
     setStatus(batchId: string, status: string) {
       statuses.set(batchId, status);
     },

@@ -76,6 +76,20 @@ export type PurchaseView = {
   overruled: string | null;
   model: string;
   log: Quote[];
+  order: PurchaseOrder | null;
+};
+
+/** The owner-approved order for a purchase: paid to the supplier with PayPal Payouts. */
+export type PurchaseOrder = {
+  status: "ordering" | "ordered" | "order_failed";
+  supplierName: string;
+  total: string;
+  payoutBatchId: string | null;
+  payoutStatus: string | null;
+  error: string | null;
+  invoice: { id: string | null; status: string | null; error: string | null };
+  tracking: { carrier: string; number: string; expectedBy: string } | null;
+  orderedAt: string | null;
 };
 
 export type ProjectSummary = { id: number; name: string; fund: Fund };
@@ -211,8 +225,10 @@ type FileRow = { role: "invoice" | "photo"; mime: string; data: string };
 
 const PROJECT_SQL = `
   SELECT p.id, p.name, p.budget_minor, p.currency,
-         COALESCE((SELECT SUM(amount_minor) FROM milestone m WHERE m.project_id = p.id AND m.status = 'paid'), 0) AS released_minor,
-         COALESCE((SELECT SUM(amount_minor) FROM milestone m WHERE m.project_id = p.id AND m.status = 'approved'), 0) AS in_flight_minor
+         COALESCE((SELECT SUM(amount_minor) FROM milestone m WHERE m.project_id = p.id AND m.status = 'paid'), 0)
+           + COALESCE((SELECT SUM(order_total_minor) FROM purchase o WHERE o.project_id = p.id AND o.order_status = 'ordered'), 0) AS released_minor,
+         COALESCE((SELECT SUM(amount_minor) FROM milestone m WHERE m.project_id = p.id AND m.status = 'approved'), 0)
+           + COALESCE((SELECT SUM(order_total_minor) FROM purchase o WHERE o.project_id = p.id AND o.order_status = 'ordering'), 0) AS in_flight_minor
   FROM project p`;
 
 const MILESTONE_SQL = `
@@ -404,6 +420,17 @@ export function createService({
           model: string;
           created_at: string;
           currency: string;
+          order_status: PurchaseOrder["status"] | null;
+          order_total_minor: number | null;
+          order_error: string | null;
+          payout_batch_id: string | null;
+          payout_status: string | null;
+          invoice_id: string | null;
+          invoice_status: string | null;
+          invoice_error: string | null;
+          tracking_number: string | null;
+          tracking_carrier: string | null;
+          ordered_at: string | null;
         }
       | undefined;
     if (!r) return undefined;
@@ -482,6 +509,26 @@ export function createService({
       overruled: r.overruled,
       model: r.model,
       log,
+      order: r.order_status
+        ? {
+            status: r.order_status,
+            supplierName: winner?.supplierName ?? "",
+            total: formatMinor(r.order_total_minor ?? 0),
+            payoutBatchId: r.payout_batch_id,
+            payoutStatus: r.payout_status,
+            error: r.order_error,
+            invoice: { id: r.invoice_id, status: r.invoice_status, error: r.invoice_error },
+            tracking:
+              r.tracking_number && r.tracking_carrier && r.ordered_at && winner
+                ? {
+                    carrier: r.tracking_carrier,
+                    number: r.tracking_number,
+                    expectedBy: new Date(Date.parse(r.ordered_at) + winner.leadDays * 86400000).toISOString().slice(0, 10),
+                  }
+                : null,
+            orderedAt: r.ordered_at,
+          }
+        : null,
     };
   }
 
@@ -734,7 +781,21 @@ export function createService({
       if (!payout) return { result: "ignored", reason: `unhandled event type ${event.event_type}` };
       const row = db.prepare(`${MILESTONE_SQL} WHERE m.payout_batch_id = ?`).get(payout.batchId) as
         MilestoneRow | undefined;
-      if (!row) return { result: "ignored", reason: `no milestone for batch ${payout.batchId}` };
+      if (!row) {
+        const order = db.prepare(`SELECT id, payout_status FROM purchase WHERE payout_batch_id = ?`).get(payout.batchId) as
+          | { id: number; payout_status: string | null }
+          | undefined;
+        if (!order) return { result: "ignored", reason: `no milestone or order for batch ${payout.batchId}` };
+        const next = nextPayoutStatus(order.payout_status, payout.status);
+        if (!next.apply) return { result: "ignored", reason: `${payout.status} does not move ${order.payout_status} forward` };
+        db.prepare(`UPDATE purchase SET payout_status = ?, order_status = ? WHERE id = ?`).run(
+          payout.status,
+          next.failed ? "order_failed" : "ordered",
+          order.id,
+        );
+        auditPurchase(order.id, "payout_status", `batch ${payout.batchId}: ${payout.status} (webhook ${event.event_type})`);
+        return { result: "applied", reason: `order ${order.id} ${payout.batchId}: ${payout.status}` };
+      }
       return applyPayoutStatus(row, payout.status, `webhook ${event.event_type}`)
         ? { result: "applied", reason: `${payout.batchId}: ${payout.status}` }
         : { result: "ignored", reason: `${payout.status} does not move ${row.payout_status} forward` };
@@ -902,6 +963,106 @@ export function createService({
           ? `${winner.supplierName} at ${formatMinor(winner.totalMinor)}${overruled ? ` (${overruled})` : ""}`
           : "no supplier fits",
       );
+      return getPurchase(purchaseId)!;
+    },
+
+    /**
+     * Owner approves the recommended quote. The service, not the AI, pays the
+     * supplier its final total with PayPal Payouts, records a PayPal invoice for
+     * the order (best effort: needs the app's Invoicing permission) and attaches
+     * the supplier's shipment tracking.
+     */
+    async approveQuote(purchaseId: number, credential: Credential): Promise<PurchaseView> {
+      requireOwner(credential);
+      const view = getPurchase(purchaseId);
+      if (!view) throw new Error(`Purchase ${purchaseId} not found`);
+      if (view.order?.status === "ordered" || view.order?.status === "ordering") throw new Error("This purchase is already ordered");
+      if (!view.recommendation) throw new Error("No supplier fits this request, so there is nothing to order");
+      const win = view.rows.find((r) => r.supplierId === view.recommendation!.supplierId)!;
+      const totalMinor = Math.round(win.total * 100);
+      const p = project(view.projectId)!;
+      const remaining = p.budget_minor - p.released_minor - p.in_flight_minor;
+      if (totalMinor > remaining) throw new Error("Order refused: insufficient_fund");
+
+      const started = epoch();
+      const prev = db.prepare(`SELECT order_attempts, order_request_id FROM purchase WHERE id = ?`).get(purchaseId) as {
+        order_attempts: number;
+        order_request_id: string | null;
+      };
+      const requestId = prev.order_request_id ?? `proofpay-${started.slice(0, 12)}-o${purchaseId}-a${prev.order_attempts + 1}`;
+      const { changes } = db
+        .prepare(
+          `UPDATE purchase SET order_status = 'ordering', order_total_minor = ?, order_attempts = order_attempts + 1,
+             order_request_id = ? WHERE id = ? AND (order_status IS NULL OR order_status = 'order_failed')`,
+        )
+        .run(totalMinor, requestId, purchaseId);
+      if (changes === 0) throw new Error("This purchase is already ordered");
+      auditPurchase(purchaseId, "approved", `owner approved ${win.supplierName} at ${formatMinor(totalMinor)} ${view.currency}`);
+
+      const note = `${p.name}: ${view.quantity} ${view.unit} ${view.item} from ${win.supplierName}`;
+      let batchId: string;
+      try {
+        const payout = await paypal.createPayout({
+          requestId,
+          receiverEmail: seed.payeeEmail,
+          amount: formatMinor(totalMinor),
+          currency: view.currency,
+          note,
+        });
+        assertSameEpoch(started);
+        batchId = payout.batchId;
+        db.prepare(`UPDATE purchase SET payout_batch_id = ?, payout_status = ?, order_error = NULL WHERE id = ?`).run(
+          payout.batchId,
+          payout.status,
+          purchaseId,
+        );
+        auditPurchase(purchaseId, "payout_sent", `batch ${payout.batchId}: ${payout.status}`);
+      } catch (err) {
+        assertSameEpoch(started);
+        const message = err instanceof Error ? err.message : String(err);
+        const definite = err instanceof PayoutRejected;
+        db.prepare(`UPDATE purchase SET order_status = 'order_failed', order_error = ?, order_request_id = ? WHERE id = ?`).run(
+          message,
+          definite ? null : requestId,
+          purchaseId,
+        );
+        auditPurchase(purchaseId, "payout_failed", message);
+        return getPurchase(purchaseId)!;
+      }
+
+      // The PayPal invoice is the order's record; a failure here does not undo the payment.
+      try {
+        const inv = await paypal.createPurchaseInvoice({
+          requestId,
+          recipientEmail: seed.payeeEmail,
+          supplierName: win.supplierName,
+          item: view.item,
+          quantity: view.quantity,
+          unitAmount: formatMinor(Math.round(win.finalUnit * 100)),
+          currency: view.currency,
+          note,
+        });
+        const status = await paypal.recordInvoicePayment(
+          inv.invoiceId,
+          formatMinor(totalMinor),
+          view.currency,
+          `Paid by ProofPay through PayPal Payouts batch ${batchId}`,
+        );
+        db.prepare(`UPDATE purchase SET invoice_id = ?, invoice_status = ? WHERE id = ?`).run(inv.invoiceId, status, purchaseId);
+        auditPurchase(purchaseId, "invoice", `PayPal invoice ${inv.invoiceId}: ${status}`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        db.prepare(`UPDATE purchase SET invoice_error = ? WHERE id = ?`).run(message, purchaseId);
+        auditPurchase(purchaseId, "invoice_failed", message);
+      }
+
+      // Simulated supplier dispatch: carrier and tracking number for the order.
+      const digits = createHash("sha256").update(`${started}:${purchaseId}`).digest().readUInt32BE(0) % 100_000_000;
+      const tracking = `${win.supplierName.slice(0, 2).toUpperCase()}${String(digits).padStart(8, "0")}SG`;
+      db.prepare(
+        `UPDATE purchase SET order_status = 'ordered', tracking_number = ?, tracking_carrier = ?, ordered_at = ? WHERE id = ?`,
+      ).run(tracking, `${win.supplierName} Logistics`, new Date(now()).toISOString(), purchaseId);
+      auditPurchase(purchaseId, "shipped", `tracking ${tracking}, delivery in ${win.leadDays} days`);
       return getPurchase(purchaseId)!;
     },
 

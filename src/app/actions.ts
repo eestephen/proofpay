@@ -97,3 +97,10 @@ export async function requestMaterials(formData: FormData) {
     app().requestMaterials(projectId, String(formData.get("request") ?? ""), await ownerCredential()),
   );
 }
+
+export async function approveQuote(formData: FormData) {
+  const projectId = Number(formData.get("projectId"));
+  const purchaseId = Number(formData.get("purchaseId"));
+  if (!Number.isInteger(projectId) || !Number.isInteger(purchaseId)) throw new Error("Invalid id");
+  await run(`/projects/${projectId}`, async () => app().approveQuote(purchaseId, await ownerCredential()));
+}

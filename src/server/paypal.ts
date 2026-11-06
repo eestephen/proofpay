@@ -113,4 +113,63 @@ export async function verifyWebhook(headers: Record<string, string>, body: strin
   return ((await res.json()) as { verification_status: string }).verification_status === "SUCCESS";
 }
 
-export const paypalAdapter: PayPalPort = { createPayout, getPayoutStatus, verifyWebhook };
+async function invoicing(path: string, init: RequestInit = {}) {
+  const token = await accessToken();
+  const res = await fetch(`${BASE}/v2/invoicing/invoices${path}`, {
+    ...init,
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Prefer: "return=representation", ...init.headers },
+  });
+  if (!res.ok) throw new Error(`PayPal invoicing failed: ${res.status} ${await res.text()}`);
+  return res.status === 204 ? {} : res.json();
+}
+
+export const createPurchaseInvoice: PayPalPort["createPurchaseInvoice"] = async (input) => {
+  const created = (await invoicing("", {
+    method: "POST",
+    headers: { "PayPal-Request-Id": `${input.requestId}-invoice` },
+    body: JSON.stringify({
+      detail: {
+        currency_code: input.currency,
+        invoice_number: input.requestId.slice(-25),
+        note: input.note,
+        payment_term: { term_type: "DUE_ON_RECEIPT" },
+      },
+      primary_recipients: [{ billing_info: { email_address: input.recipientEmail, business_name: input.supplierName } }],
+      items: [
+        {
+          name: input.item.slice(0, 200),
+          quantity: String(input.quantity),
+          unit_amount: { currency_code: input.currency, value: input.unitAmount },
+          unit_of_measure: "QUANTITY",
+        },
+      ],
+    }),
+  })) as { id: string; status: string };
+  await invoicing(`/${encodeURIComponent(created.id)}/send`, {
+    method: "POST",
+    body: JSON.stringify({ send_to_invoicer: true, send_to_recipient: false }),
+  });
+  return { invoiceId: created.id, status: "SENT" };
+};
+
+export const recordInvoicePayment: PayPalPort["recordInvoicePayment"] = async (invoiceId, amount, currency, note) => {
+  await invoicing(`/${encodeURIComponent(invoiceId)}/payments`, {
+    method: "POST",
+    body: JSON.stringify({
+      method: "OTHER",
+      payment_date: new Date().toISOString().slice(0, 10),
+      amount: { currency_code: currency, value: amount },
+      note,
+    }),
+  });
+  const inv = (await invoicing(`/${encodeURIComponent(invoiceId)}`)) as { status: string };
+  return inv.status;
+};
+
+export const paypalAdapter: PayPalPort = {
+  createPayout,
+  getPayoutStatus,
+  verifyWebhook,
+  createPurchaseInvoice,
+  recordInvoicePayment,
+};

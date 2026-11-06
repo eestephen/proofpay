@@ -47,3 +47,4 @@ next-env.d.ts
 # local screenshots
 /demo/skeleton-*.png
 /demo/t0*-*.png
+/demo/t08-*.png
