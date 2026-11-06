@@ -37,7 +37,13 @@ describe("seeded project", () => {
   it("lists the kitchen renovation with its full fund remaining", () => {
     const [project] = service.listProjects();
     expect(project.name).toBe("Kitchen renovation, 14 Elm St");
-    expect(project.fund).toEqual({ budget: "8000.00", released: "0.00", remaining: "8000.00", currency: "SGD" });
+    expect(project.fund).toEqual({
+      budget: "8000.00",
+      released: "0.00",
+      committed: "0.00",
+      remaining: "8000.00",
+      currency: "SGD",
+    });
   });
 
   it("shows four milestones awaiting proof", () => {
@@ -525,5 +531,51 @@ describe("PayPal webhooks (ticket 05)", () => {
 
   it("rejects a body that is not JSON", async () => {
     expect(await service.handleWebhook({ headers: {}, body: "not json" })).toMatchObject({ result: "rejected" });
+  });
+});
+
+describe("project board (ticket 06)", () => {
+  it("returns one light row per milestone with status, recommendation and last event", async () => {
+    verifier.willReturn({ recommendation: "release", extractedTotal: "$1,850.00" });
+    await service.submitProof(tilingId, png, owner);
+    const board = service.getBoard(service.listProjects()[0].id)!;
+    expect(board.rows).toHaveLength(4);
+    const tiling = board.rows[1];
+    expect(tiling).toMatchObject({
+      id: tilingId,
+      title: "Stage 2: Wall and floor tiling",
+      payeeName: "Tan Tiling Works",
+      amount: 1200,
+      currency: "SGD",
+      status: "on_hold",
+      recommendation: "hold",
+      fraudChecks: 1,
+      lastEvent: "verified",
+    });
+    expect(board.rows[0]).toMatchObject({ status: "awaiting_proof", recommendation: null, fraudChecks: 0, lastEvent: null });
+    expect(JSON.stringify(board)).not.toMatch(/payee@example.com|iVBOR|"image"/);
+  });
+
+  it("shows money committed to an in-flight payout separately from released", async () => {
+    const resume = paypal.pause();
+    await service.submitProof(tilingId, png, owner);
+    const pending = service.approveRelease(tilingId, owner);
+    await Promise.resolve();
+    expect(service.getBoard(service.listProjects()[0].id)!.fund).toMatchObject({
+      released: "0.00",
+      committed: "1200.00",
+      remaining: "6800.00",
+    });
+    resume();
+    await pending;
+    expect(service.getBoard(service.listProjects()[0].id)!.fund).toMatchObject({
+      released: "1200.00",
+      committed: "0.00",
+      remaining: "6800.00",
+    });
+  });
+
+  it("returns undefined for an unknown project", () => {
+    expect(service.getBoard(999)).toBeUndefined();
   });
 });

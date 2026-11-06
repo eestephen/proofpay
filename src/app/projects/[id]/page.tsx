@@ -3,10 +3,12 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { connection } from "next/server";
 import { app } from "@/server/app";
+import { FundSummary } from "../../fund-summary";
+import { MilestoneGrid } from "./milestone-grid";
 
 export default function Page({ params }: { params: Promise<{ id: string }> }) {
   return (
-    <main className="mx-auto max-w-3xl p-8 font-sans">
+    <main className="mx-auto w-full max-w-6xl p-8 font-sans">
       <Link className="text-sm underline" href="/">
         ← All projects
       </Link>
@@ -19,43 +21,15 @@ export default function Page({ params }: { params: Promise<{ id: string }> }) {
 
 async function Project({ params }: { params: Promise<{ id: string }> }) {
   await connection();
-  const project = app().getProject(Number((await params).id));
-  if (!project) notFound();
-  const { fund } = project;
+  const board = app().getBoard(Number((await params).id));
+  if (!board) notFound();
   return (
     <>
-      <h1 className="mt-2 text-2xl font-bold">{project.name}</h1>
-      <p className="mb-6 text-gray-600">
-        Budget {fund.budget} {fund.currency} · released {fund.released} · remaining <b>{fund.remaining}</b>
-      </p>
-      <table className="w-full text-left text-sm">
-        <thead>
-          <tr className="border-b">
-            <th className="py-2">Milestone</th>
-            <th>Payee</th>
-            <th>Amount</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {project.milestones.map((m) => (
-            <tr className="border-b" key={m.id}>
-              <td className="py-2">
-                <Link className="underline" href={`/milestones/${m.id}`}>
-                  {m.title}
-                </Link>
-              </td>
-              <td>{m.payeeName}</td>
-              <td>
-                {m.amount} {m.currency}
-              </td>
-              <td>
-                <code>{m.status}</code>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <h1 className="mb-4 mt-2 text-2xl font-bold">{board.name}</h1>
+      <FundSummary fund={board.fund} />
+      <h2 className="mb-2 mt-6 font-semibold">Milestones</h2>
+      <MilestoneGrid rows={board.rows} />
+      <p className="mt-2 text-sm text-gray-500">Click a column header to sort, the menu to filter, a row to open it.</p>
     </>
   );
 }

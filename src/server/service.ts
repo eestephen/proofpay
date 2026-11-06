@@ -5,7 +5,27 @@ import { PayoutRejected, type PayPalPort, type ProofFile, type VerifierPort } fr
 import { seedStore, type SeedOptions } from "./store";
 import type { Verification } from "./verify";
 
-export type Fund = { budget: string; released: string; remaining: string; currency: string };
+/** released = paid out; committed = approved and in flight; remaining = what can still be released. */
+export type Fund = { budget: string; released: string; committed: string; remaining: string; currency: string };
+
+/** One milestone row for the project board. No images, emails or audit detail. */
+export type BoardRow = {
+  id: number;
+  position: number;
+  title: string;
+  payeeName: string;
+  /** Major units, as a number so the grid can sort and filter it. */
+  amount: number;
+  currency: string;
+  status: MilestoneStatus;
+  recommendation: "release" | "hold" | null;
+  fraudChecks: number;
+  payoutStatus: string | null;
+  lastEvent: AuditKind | null;
+  lastEventAt: string | null;
+};
+
+export type Board = ProjectSummary & { rows: BoardRow[] };
 
 export type ProjectSummary = { id: number; name: string; fund: Fund };
 
@@ -149,6 +169,7 @@ function toSummary(r: ProjectRow): ProjectSummary {
     fund: {
       budget: formatMinor(r.budget_minor),
       released: formatMinor(r.released_minor),
+      committed: formatMinor(r.in_flight_minor),
       remaining: formatMinor(r.budget_minor - r.released_minor - r.in_flight_minor),
       currency: r.currency,
     },
@@ -531,6 +552,50 @@ export function createService({ db, seed, paypal, verifier, ownerPasscode, secre
         db.prepare(`${MILESTONE_SQL} WHERE m.project_id = ? ORDER BY m.position`).all(id) as MilestoneRow[]
       ).map((m) => toMilestone(m, currentFiles(m.id), history(m.id)));
       return { ...toSummary(row), milestones };
+    },
+
+    getBoard(projectId: number): Board | undefined {
+      const p = project(projectId);
+      if (!p) return undefined;
+      const rows = db
+        .prepare(
+          `SELECT m.id, m.position, m.title, m.payee_name, m.amount_minor, m.status, m.verification, m.payout_status,
+                  (SELECT kind FROM audit a WHERE a.milestone_id = m.id ORDER BY a.id DESC LIMIT 1) AS last_kind,
+                  (SELECT at FROM audit a WHERE a.milestone_id = m.id ORDER BY a.id DESC LIMIT 1) AS last_at
+           FROM milestone m WHERE m.project_id = ? ORDER BY m.position`,
+        )
+        .all(projectId) as {
+        id: number;
+        position: number;
+        title: string;
+        payee_name: string;
+        amount_minor: number;
+        status: MilestoneStatus;
+        verification: string | null;
+        payout_status: string | null;
+        last_kind: AuditKind | null;
+        last_at: string | null;
+      }[];
+      return {
+        ...toSummary(p),
+        rows: rows.map((r) => {
+          const a = r.verification ? (JSON.parse(r.verification) as Assessment) : null;
+          return {
+            id: r.id,
+            position: r.position,
+            title: r.title,
+            payeeName: r.payee_name,
+            amount: r.amount_minor / 100,
+            currency: p.currency,
+            status: r.status,
+            recommendation: a?.recommendation ?? null,
+            fraudChecks: a?.flags.length ?? 0,
+            payoutStatus: r.payout_status,
+            lastEvent: r.last_kind,
+            lastEventAt: r.last_at,
+          };
+        }),
+      };
     },
 
     getMilestone(id: number): MilestoneView | undefined {

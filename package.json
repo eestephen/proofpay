@@ -18,6 +18,8 @@
   },
   "dependencies": {
     "@ai-sdk/google": "4.0.111",
+    "ag-grid-community": "36.3.0",
+    "ag-grid-react": "36.3.0",
     "ai": "7.0.162",
     "next": "16.4.4",
     "react": "19.3.0",

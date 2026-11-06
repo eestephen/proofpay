@@ -52,9 +52,11 @@ export function fakePayPal() {
   const statuses = new Map<string, string>();
   let failure: { message: string; definite: boolean } | null = null;
   let webhooksGenuine = true;
+  let gate: Promise<void> | null = null;
   const port: PayPalPort = {
     async createPayout(input) {
       payouts.push(input);
+      if (gate) await gate;
       if (failure) {
         const { message, definite } = failure;
         failure = null;
@@ -78,6 +80,15 @@ export function fakePayPal() {
       statuses.set(batchId, status);
     },
     /** The next createPayout call throws this message (and is still recorded). */
+    /** Holds the next createPayout call until the returned function is called. */
+    pause(): () => void {
+      let release!: () => void;
+      gate = new Promise<void>((r) => (release = r));
+      return () => {
+        gate = null;
+        release();
+      };
+    },
     /** verifyWebhook answers false from now on. */
     rejectWebhooks() {
       webhooksGenuine = false;
