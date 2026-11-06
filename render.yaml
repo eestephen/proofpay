@@ -24,5 +24,7 @@ services:
         sync: false
       - key: GOOGLE_GENERATIVE_AI_API_KEY
         sync: false
+      - key: CHANNEL3_API_KEY
+        sync: false
       - key: PAYOUT_RECEIVER_EMAIL
         sync: false

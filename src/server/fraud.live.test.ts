@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { createService } from "./service";
 import { openStore } from "./store";
-import { fakePayPal } from "./testing/fakes";
+import { fakeCatalog, fakeNegotiator, fakePayPal } from "./testing/fakes";
 import { geminiVerifier } from "./verify";
 
 // Real Gemini against the demo fraud images. No PayPal calls. Run: npm run test:live
@@ -13,6 +13,8 @@ function make() {
     seed,
     paypal: fakePayPal().port,
     verifier: geminiVerifier,
+    catalog: fakeCatalog().port,
+    negotiator: fakeNegotiator().port,
     ownerPasscode: "live",
     secret: "live",
   });

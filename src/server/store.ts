@@ -5,6 +5,8 @@ export type SeedOptions = { currency: string; payeeEmail: string; budgetMinor?: 
 
 const SCHEMA = `
   DROP TABLE IF EXISTS audit;
+  DROP TABLE IF EXISTS quote;
+  DROP TABLE IF EXISTS purchase;
   DROP TABLE IF EXISTS proof_file;
   DROP TABLE IF EXISTS milestone;
   DROP TABLE IF EXISTS project;
@@ -46,9 +48,42 @@ const SCHEMA = `
     superseded INTEGER NOT NULL DEFAULT 0
   );
   CREATE INDEX proof_file_sha ON proof_file(sha256);
+  CREATE TABLE purchase (
+    id INTEGER PRIMARY KEY,
+    project_id INTEGER NOT NULL REFERENCES project(id),
+    text TEXT NOT NULL,
+    item TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    unit TEXT NOT NULL,
+    budget_minor INTEGER NOT NULL,
+    deadline_days INTEGER NOT NULL,
+    reference TEXT NOT NULL,
+    status TEXT NOT NULL,
+    supplier_id TEXT,
+    agent_supplier_id TEXT,
+    reasoning TEXT NOT NULL,
+    overruled TEXT,
+    model TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE quote (
+    id INTEGER PRIMARY KEY,
+    purchase_id INTEGER NOT NULL REFERENCES purchase(id),
+    supplier_id TEXT NOT NULL,
+    supplier_name TEXT NOT NULL,
+    round INTEGER NOT NULL,
+    counter_unit_minor INTEGER,
+    unit_minor INTEGER NOT NULL,
+    total_minor INTEGER NOT NULL,
+    quantity INTEGER NOT NULL,
+    lead_days INTEGER NOT NULL,
+    available INTEGER NOT NULL,
+    note TEXT NOT NULL
+  );
   CREATE TABLE audit (
     id INTEGER PRIMARY KEY,
-    milestone_id INTEGER NOT NULL REFERENCES milestone(id),
+    milestone_id INTEGER REFERENCES milestone(id),
+    purchase_id INTEGER REFERENCES purchase(id),
     at TEXT NOT NULL,
     kind TEXT NOT NULL,
     detail TEXT NOT NULL

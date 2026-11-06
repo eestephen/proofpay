@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createService, type Service } from "./service";
 import { openStore, type SeedOptions } from "./store";
-import { fakePayPal, fakeVerifier } from "./testing/fakes";
+import { fakeCatalog, fakeNegotiator, fakePayPal, fakeVerifier } from "./testing/fakes";
 
 const PASSCODE = "test-passcode";
 const png = { data: new Uint8Array([137, 80, 78, 71, 1, 2, 3]), mediaType: "image/png" };
@@ -9,18 +9,22 @@ const png = { data: new Uint8Array([137, 80, 78, 71, 1, 2, 3]), mediaType: "imag
 function make(seedOverrides: Partial<SeedOptions> = {}) {
   const paypal = fakePayPal();
   const verifier = fakeVerifier();
+  const catalog = fakeCatalog();
+  const negotiator = fakeNegotiator();
   const seed: SeedOptions = { currency: "SGD", payeeEmail: "payee@example.com", ...seedOverrides };
   const service = createService({
     db: openStore(":memory:", seed),
     seed,
     paypal: paypal.port,
     verifier: verifier.port,
+    catalog: catalog.port,
+    negotiator: negotiator.port,
     ownerPasscode: PASSCODE,
     secret: "test-secret",
   });
   const owner = service.ownerSession(PASSCODE)!;
   const milestones = () => service.getProject(service.listProjects()[0].id)!.milestones;
-  return { service, paypal, verifier, owner, milestones, tilingId: milestones()[1].id };
+  return { service, paypal, verifier, catalog, negotiator, owner, milestones, tilingId: milestones()[1].id };
 }
 
 let service: Service;
@@ -217,6 +221,8 @@ describe("owner passcode (ticket 02)", () => {
       seed,
       paypal: fakePayPal().port,
       verifier: fakeVerifier().port,
+      catalog: fakeCatalog().port,
+      negotiator: fakeNegotiator().port,
       ownerPasscode: undefined,
       secret: "s",
     });
@@ -422,6 +428,8 @@ describe("review fixes", () => {
       seed,
       paypal: fakePayPal().port,
       verifier: fakeVerifier().port,
+      catalog: fakeCatalog().port,
+      negotiator: fakeNegotiator().port,
       ownerPasscode: "pw",
       secret: "s",
       now: () => now,
@@ -577,5 +585,84 @@ describe("project board (ticket 06)", () => {
 
   it("returns undefined for an unknown project", () => {
     expect(service.getBoard(999)).toBeUndefined();
+  });
+});
+
+describe("buyer agent (ticket 07)", () => {
+  const ask = "Buy 40 m2 of porcelain floor tiles, max 1,300 SGD, delivered within 5 days";
+
+  it("negotiates with all three suppliers and recommends the cheapest offer that fits", async () => {
+    const t = make();
+    const projectId = t.service.listProjects()[0].id;
+    const p = await t.service.requestMaterials(projectId, ask, t.owner);
+    expect(p.status).toBe("quoted");
+    expect(p.rows).toHaveLength(3);
+    expect(p.rows.every((r) => r.rounds === 3)).toBe(true);
+    // reference 30.00/m2: Lion City floor 29.10 (3 days), Jurong 27.00 but 7 days, Kranji only 60 in stock... 30.60
+    const fits = p.rows.filter((r) => r.withinBudget && r.withinDeadline && r.available);
+    expect(p.recommendation?.supplierId).toBe(fits.sort((a, b) => a.total - b.total)[0].supplierId);
+    expect(p.recommendation!.total).toBeLessThanOrEqual(1300);
+    expect(p.reference).toMatchObject({ title: "Porcelain floor tile 60x60, per m2", unitPrice: "30.00" });
+  });
+
+  it("marks offers that break the deadline and never recommends them", async () => {
+    const t = make();
+    const p = await t.service.requestMaterials(t.service.listProjects()[0].id, ask, t.owner);
+    const jurong = p.rows.find((r) => r.supplierId === "jurong")!;
+    expect(jurong.withinDeadline).toBe(false);
+    expect(p.recommendation?.supplierId).not.toBe("jurong");
+  });
+
+  it("overrules an agent pick that is over budget or late, and says so", async () => {
+    const t = make();
+    t.negotiator.pick("jurong");
+    const p = await t.service.requestMaterials(t.service.listProjects()[0].id, ask, t.owner);
+    expect(p.recommendation?.supplierId).not.toBe("jurong");
+    expect(p.overruled).toMatch(/Jurong.*7 days.*deadline of 5 days/);
+  });
+
+  it("reports no fit when no supplier meets the budget", async () => {
+    const t = make();
+    t.negotiator.setRequest({ budgetMinor: 50000 });
+    const p = await t.service.requestMaterials(t.service.listProjects()[0].id, ask, t.owner);
+    expect(p.status).toBe("no_fit");
+    expect(p.recommendation).toBeNull();
+  });
+
+  it("logs every negotiation round", async () => {
+    const t = make();
+    const p = await t.service.requestMaterials(t.service.listProjects()[0].id, ask, t.owner);
+    expect(p.log).toHaveLength(9);
+    expect(p.log.filter((q) => q.counterUnitMinor !== null)).toHaveLength(6);
+  });
+
+  it("refuses a reference price the catalog does not support", async () => {
+    const t = make();
+    t.negotiator.setReferencePrice(999999);
+    await expect(t.service.requestMaterials(t.service.listProjects()[0].id, ask, t.owner)).rejects.toThrow(
+      /reference price/,
+    );
+  });
+
+  it("refuses a request without quantity, budget or deadline", async () => {
+    const t = make();
+    t.negotiator.setRequest({ quantity: 0 });
+    await expect(t.service.requestMaterials(t.service.listProjects()[0].id, "buy tiles", t.owner)).rejects.toThrow(
+      /quantity, a budget and a deadline/,
+    );
+  });
+
+  it("is owner only", async () => {
+    await expect(service.requestMaterials(service.listProjects()[0].id, ask, undefined)).rejects.toThrow(
+      /Owner passcode required/,
+    );
+  });
+
+  it("lists past purchases on the project, newest first", async () => {
+    const t = make();
+    const id = t.service.listProjects()[0].id;
+    await t.service.requestMaterials(id, ask, t.owner);
+    await t.service.requestMaterials(id, "Buy 10 bags of grout, max 200 SGD, within 3 days", t.owner);
+    expect(t.service.listPurchases(id)).toHaveLength(2);
   });
 });

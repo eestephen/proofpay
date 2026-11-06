@@ -4,6 +4,7 @@ import { paypalAdapter } from "./paypal";
 import { createService } from "./service";
 import { openStore } from "./store";
 import { geminiVerifier } from "./verify";
+import { fakeCatalog, fakeNegotiator } from "./testing/fakes";
 
 // Live check against real Gemini + PayPal sandbox through the app service.
 // Sends a real sandbox payout. Run: npm run test:live
@@ -18,6 +19,8 @@ describe("live: app service with real adapters", () => {
       seed,
       paypal: paypalAdapter,
       verifier: geminiVerifier,
+    catalog: fakeCatalog().port,
+    negotiator: fakeNegotiator().port,
       ownerPasscode: "live",
       secret: "live",
     });

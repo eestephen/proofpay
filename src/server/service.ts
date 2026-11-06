@@ -1,7 +1,17 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { checkRelease, formatMinor, nextPayoutStatus, parseAmountMinor, type MilestoneStatus } from "@/domain/release";
-import { PayoutRejected, type PayPalPort, type ProofFile, type VerifierPort } from "./ports";
+import { decideWinner, SupplierDesk, summariseQuotes, type Quote } from "@/domain/procurement";
+import {
+  PayoutRejected,
+  type CatalogPort,
+  type CatalogProduct,
+  type NegotiatorPort,
+  type PayPalPort,
+  type ProofFile,
+  type PurchaseRequest,
+  type VerifierPort,
+} from "./ports";
 import { seedStore, type SeedOptions } from "./store";
 import type { Verification } from "./verify";
 
@@ -26,6 +36,47 @@ export type BoardRow = {
 };
 
 export type Board = ProjectSummary & { rows: BoardRow[] };
+
+export type PurchaseQuoteRow = {
+  supplierId: string;
+  supplierName: string;
+  /** Major units, numbers so the grid can sort them. */
+  openingUnit: number;
+  finalUnit: number;
+  total: number;
+  leadDays: number;
+  rounds: number;
+  available: boolean;
+  withinBudget: boolean;
+  withinDeadline: boolean;
+  recommended: boolean;
+  lastNote: string;
+};
+
+export type PurchaseView = {
+  id: number;
+  projectId: number;
+  text: string;
+  item: string;
+  quantity: number;
+  unit: string;
+  budget: string;
+  deadlineDays: number;
+  currency: string;
+  createdAt: string;
+  reference: Pick<CatalogProduct, "title" | "merchant" | "url" | "listedPrice" | "source"> & {
+    unitPrice: string;
+    reason: string;
+  };
+  status: "quoted" | "no_fit";
+  rows: PurchaseQuoteRow[];
+  recommendation: { supplierId: string; supplierName: string; total: number; leadDays: number } | null;
+  reasoning: string;
+  /** Set when ProofPay's rules replaced the agent's pick. */
+  overruled: string | null;
+  model: string;
+  log: Quote[];
+};
 
 export type ProjectSummary = { id: number; name: string; fund: Fund };
 
@@ -79,6 +130,8 @@ export type Deps = {
   seed: SeedOptions;
   paypal: PayPalPort;
   verifier: VerifierPort;
+  catalog: CatalogPort;
+  negotiator: NegotiatorPort;
   /** Owner sign-in is disabled when unset. */
   ownerPasscode: string | undefined;
   /** Signs owner sessions and payee links. */
@@ -106,7 +159,11 @@ function payoutEvent(event: {
   if (event.event_type?.startsWith("PAYMENT.PAYOUTS-ITEM.") && r?.payout_batch_id && r.transaction_status) {
     return { batchId: r.payout_batch_id, status: r.transaction_status };
   }
-  if (event.event_type?.startsWith("PAYMENT.PAYOUTSBATCH.") && r?.batch_header?.payout_batch_id && r.batch_header.batch_status) {
+  if (
+    event.event_type?.startsWith("PAYMENT.PAYOUTSBATCH.") &&
+    r?.batch_header?.payout_batch_id &&
+    r.batch_header.batch_status
+  ) {
     return { batchId: r.batch_header.payout_batch_id, status: r.batch_header.batch_status };
   }
   return null;
@@ -216,7 +273,17 @@ function validateProof(files: ProofFile[]) {
   }
 }
 
-export function createService({ db, seed, paypal, verifier, ownerPasscode, secret, now = Date.now }: Deps) {
+export function createService({
+  db,
+  seed,
+  paypal,
+  verifier,
+  catalog,
+  negotiator,
+  ownerPasscode,
+  secret,
+  now = Date.now,
+}: Deps) {
   const sign = (value: string) => createHmac("sha256", secret).update(value).digest("base64url");
   // Bound to the passcode, so changing the passcode signs everyone out.
   const ownerSig = (issuedAt: number) => sign(`owner:${ownerPasscode}:${issuedAt}`);
@@ -307,6 +374,117 @@ export function createService({ db, seed, paypal, verifier, ownerPasscode, secre
     return true;
   }
 
+  function auditPurchase(purchaseId: number, kind: string, detail: string) {
+    db.prepare(`INSERT INTO audit (purchase_id, at, kind, detail) VALUES (?, ?, ?, ?)`).run(
+      purchaseId,
+      new Date(now()).toISOString(),
+      kind,
+      detail,
+    );
+  }
+
+  function getPurchase(id: number): PurchaseView | undefined {
+    const r = db
+      .prepare(`SELECT pu.*, p.currency FROM purchase pu JOIN project p ON p.id = pu.project_id WHERE pu.id = ?`)
+      .get(id) as
+      | {
+          id: number;
+          project_id: number;
+          text: string;
+          item: string;
+          quantity: number;
+          unit: string;
+          budget_minor: number;
+          deadline_days: number;
+          reference: string;
+          status: PurchaseView["status"];
+          supplier_id: string | null;
+          reasoning: string;
+          overruled: string | null;
+          model: string;
+          created_at: string;
+          currency: string;
+        }
+      | undefined;
+    if (!r) return undefined;
+    const log = (
+      db.prepare(`SELECT * FROM quote WHERE purchase_id = ? ORDER BY id`).all(id) as {
+        supplier_id: string;
+        supplier_name: string;
+        round: number;
+        counter_unit_minor: number | null;
+        unit_minor: number;
+        total_minor: number;
+        quantity: number;
+        lead_days: number;
+        available: number;
+        note: string;
+      }[]
+    ).map((q): Quote => ({
+      supplierId: q.supplier_id,
+      supplierName: q.supplier_name,
+      round: q.round,
+      counterUnitMinor: q.counter_unit_minor,
+      unitMinor: q.unit_minor,
+      totalMinor: q.total_minor,
+      quantity: q.quantity,
+      leadDays: q.lead_days,
+      available: q.available === 1,
+      note: q.note,
+    }));
+    const ref = JSON.parse(r.reference) as PurchaseView["reference"] & { unitPriceMinor: number };
+    const rows = summariseQuotes(log, { budgetMinor: r.budget_minor, deadlineDays: r.deadline_days });
+    const winner = rows.find((x) => x.supplierId === r.supplier_id);
+    return {
+      id: r.id,
+      projectId: r.project_id,
+      text: r.text,
+      item: r.item,
+      quantity: r.quantity,
+      unit: r.unit,
+      budget: formatMinor(r.budget_minor),
+      deadlineDays: r.deadline_days,
+      currency: r.currency,
+      createdAt: r.created_at,
+      reference: {
+        title: ref.title,
+        merchant: ref.merchant,
+        url: ref.url,
+        listedPrice: ref.listedPrice,
+        source: ref.source,
+        unitPrice: formatMinor(ref.unitPriceMinor),
+        reason: ref.reason,
+      },
+      status: r.status,
+      rows: rows.map((x) => ({
+        supplierId: x.supplierId,
+        supplierName: x.supplierName,
+        openingUnit: x.openingUnitMinor / 100,
+        finalUnit: x.finalUnitMinor / 100,
+        total: x.totalMinor / 100,
+        leadDays: x.leadDays,
+        rounds: x.rounds,
+        available: x.available,
+        withinBudget: x.withinBudget,
+        withinDeadline: x.withinDeadline,
+        recommended: x.supplierId === r.supplier_id,
+        lastNote: x.lastNote,
+      })),
+      recommendation: winner
+        ? {
+            supplierId: winner.supplierId,
+            supplierName: winner.supplierName,
+            total: winner.totalMinor / 100,
+            leadDays: winner.leadDays,
+          }
+        : null,
+      reasoning: r.reasoning,
+      overruled: r.overruled,
+      model: r.model,
+      log,
+    };
+  }
+
   function project(id: number): ProjectRow | undefined {
     return db.prepare(`${PROJECT_SQL} WHERE p.id = ?`).get(id) as ProjectRow | undefined;
   }
@@ -341,7 +519,9 @@ export function createService({ db, seed, paypal, verifier, ownerPasscode, secre
       );
     }
     if (v.injectionDetected) {
-      flags.push(`Instructions aimed at the reviewer were found in the document${v.injectionNote ? `: "${v.injectionNote}"` : ""}`);
+      flags.push(
+        `Instructions aimed at the reviewer were found in the document${v.injectionNote ? `: "${v.injectionNote}"` : ""}`,
+      );
     }
     return {
       ...v,
@@ -392,10 +572,16 @@ export function createService({ db, seed, paypal, verifier, ownerPasscode, secre
       const previous = row.status;
       const started = epoch();
       const { changes } = db
-        .prepare(`UPDATE milestone SET status = 'under_review' WHERE id = ? AND status IN ('awaiting_proof', 'on_hold')`)
+        .prepare(
+          `UPDATE milestone SET status = 'under_review' WHERE id = ? AND status IN ('awaiting_proof', 'on_hold')`,
+        )
         .run(id);
       if (changes === 0) throw new Error(`Proof cannot be submitted now (status: ${row.status})`);
-      audit(id, "proof_submitted", files.map((f, i) => `${i === 0 ? "invoice" : "photo"} ${f.mediaType} ${f.data.byteLength} B`).join(", "));
+      audit(
+        id,
+        "proof_submitted",
+        files.map((f, i) => `${i === 0 ? "invoice" : "photo"} ${f.mediaType} ${f.data.byteLength} B`).join(", "),
+      );
 
       let verification: Verification;
       try {
@@ -421,7 +607,9 @@ export function createService({ db, seed, paypal, verifier, ownerPasscode, secre
       const hashes = files.map((f) => sha256(f.data));
       const assessment = assess(row, verification, hashes);
       db.prepare(`UPDATE proof_file SET superseded = 1 WHERE milestone_id = ?`).run(id);
-      const insert = db.prepare(`INSERT INTO proof_file (milestone_id, role, mime, sha256, data) VALUES (?, ?, ?, ?, ?)`);
+      const insert = db.prepare(
+        `INSERT INTO proof_file (milestone_id, role, mime, sha256, data) VALUES (?, ?, ?, ?, ?)`,
+      );
       files.forEach((f, i) =>
         insert.run(id, i === 0 ? "invoice" : "photo", f.mediaType, hashes[i], Buffer.from(f.data).toString("base64")),
       );
@@ -439,7 +627,11 @@ export function createService({ db, seed, paypal, verifier, ownerPasscode, secre
      * the milestone moves to payout_failed with the error, and can be retried.
      * `override` releases a milestone the verifier put on hold.
      */
-    async approveRelease(id: number, credential: Credential, opts: { override?: boolean } = {}): Promise<MilestoneView> {
+    async approveRelease(
+      id: number,
+      credential: Credential,
+      opts: { override?: boolean } = {},
+    ): Promise<MilestoneView> {
       requireOwner(credential);
       const row = mustGet(id);
       const p = project(row.project_id)!;
@@ -469,7 +661,11 @@ export function createService({ db, seed, paypal, verifier, ownerPasscode, secre
         audit(id, "override", `owner released despite hold: ${reasons}`);
       }
       const attempt = mustGet(id).payout_attempts;
-      audit(id, "approved", `attempt ${attempt}: ${formatMinor(row.amount_minor)} ${row.currency} to ${row.payee_email}`);
+      audit(
+        id,
+        "approved",
+        `attempt ${attempt}: ${formatMinor(row.amount_minor)} ${row.currency} to ${row.payee_email}`,
+      );
 
       try {
         const payout = await paypal.createPayout({
@@ -491,7 +687,11 @@ export function createService({ db, seed, paypal, verifier, ownerPasscode, secre
         db.prepare(
           `UPDATE milestone SET status = 'payout_failed', payout_error = ?, payout_request_id = ? WHERE id = ?`,
         ).run(message, definite ? null : requestId, id);
-        audit(id, "payout_failed", `${definite ? "rejected" : "unclear, retry reuses the same request id"}: ${message}`);
+        audit(
+          id,
+          "payout_failed",
+          `${definite ? "rejected" : "unclear, retry reuses the same request id"}: ${message}`,
+        );
       }
       return view(id);
     },
@@ -533,8 +733,7 @@ export function createService({ db, seed, paypal, verifier, ownerPasscode, secre
       const payout = payoutEvent(event);
       if (!payout) return { result: "ignored", reason: `unhandled event type ${event.event_type}` };
       const row = db.prepare(`${MILESTONE_SQL} WHERE m.payout_batch_id = ?`).get(payout.batchId) as
-        | MilestoneRow
-        | undefined;
+        MilestoneRow | undefined;
       if (!row) return { result: "ignored", reason: `no milestone for batch ${payout.batchId}` };
       return applyPayoutStatus(row, payout.status, `webhook ${event.event_type}`)
         ? { result: "applied", reason: `${payout.batchId}: ${payout.status}` }
@@ -597,6 +796,122 @@ export function createService({ db, seed, paypal, verifier, ownerPasscode, secre
         }),
       };
     },
+
+    /**
+     * Buyer agent. Reads a plain-language request, takes a real product as the
+     * market reference, and negotiates with the simulated suppliers. Prices come
+     * only from the supplier desk; the recommendation must fit budget, deadline
+     * and stock. Nothing is bought here: the owner approves a quote separately.
+     */
+    async requestMaterials(projectId: number, text: string, credential: Credential): Promise<PurchaseView> {
+      requireOwner(credential);
+      const p = project(projectId);
+      if (!p) throw new Error(`Project ${projectId} not found`);
+      const trimmed = text.trim().slice(0, 500);
+      if (!trimmed) throw new Error("Describe what to buy");
+      const started = epoch();
+
+      const req: PurchaseRequest = await negotiator.parseRequest(trimmed, {
+        today: new Date(now()).toISOString().slice(0, 10),
+        currency: p.currency,
+      });
+      if (!(Number.isInteger(req.quantity) && req.quantity > 0 && req.budgetMinor > 0 && req.deadlineDays > 0)) {
+        throw new Error(
+          "Include a quantity, a budget and a deadline, e.g. '40 m2 of floor tiles, max 1,300 SGD, within 5 days'",
+        );
+      }
+      const products = await catalog.search(req.searchQuery || req.item, p.currency);
+      if (products.length === 0) throw new Error(`No reference products found for "${req.item}"`);
+      const choice = await negotiator.chooseReference(req, products);
+      const product = products.find((x) => x.id === choice.productId);
+      if (!product || !(choice.unitPriceMinor > 0) || choice.unitPriceMinor > product.priceMinor) {
+        throw new Error("The agent chose a reference price the catalog does not support; try rephrasing");
+      }
+
+      const desk = new SupplierDesk({ referenceUnitMinor: choice.unitPriceMinor, quantity: req.quantity });
+      const result = await negotiator.negotiate({ ...req, referenceUnitMinor: choice.unitPriceMinor }, {
+        suppliers: desk.suppliers.map((s) => ({ id: s.id, name: s.name })),
+        requestQuote: (id, counter) => desk.ask(id, counter === undefined ? undefined : Math.round(counter)),
+      });
+      assertSameEpoch(started);
+
+      const limits = { budgetMinor: req.budgetMinor, deadlineDays: req.deadlineDays };
+      const rows = summariseQuotes(desk.quotes, limits);
+      const { winner, overruled } = decideWinner(rows, result.recommendedSupplierId, limits);
+      const reference = {
+        title: product.title,
+        merchant: product.merchant,
+        url: product.url,
+        listedPrice: product.listedPrice,
+        source: product.source,
+        unitPriceMinor: choice.unitPriceMinor,
+        reason: choice.reason,
+      };
+      const { lastInsertRowid } = db
+        .prepare(
+          `INSERT INTO purchase (project_id, text, item, quantity, unit, budget_minor, deadline_days, reference, status,
+             supplier_id, agent_supplier_id, reasoning, overruled, model, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          projectId,
+          trimmed,
+          req.item,
+          req.quantity,
+          req.unit,
+          req.budgetMinor,
+          req.deadlineDays,
+          JSON.stringify(reference),
+          winner ? "quoted" : "no_fit",
+          winner?.supplierId ?? null,
+          result.recommendedSupplierId,
+          result.reasoning,
+          overruled,
+          result.model,
+          new Date(now()).toISOString(),
+        );
+      const purchaseId = Number(lastInsertRowid);
+      const insert = db.prepare(
+        `INSERT INTO quote (purchase_id, supplier_id, supplier_name, round, counter_unit_minor, unit_minor, total_minor,
+           quantity, lead_days, available, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      for (const q of desk.quotes) {
+        insert.run(
+          purchaseId,
+          q.supplierId,
+          q.supplierName,
+          q.round,
+          q.counterUnitMinor,
+          q.unitMinor,
+          q.totalMinor,
+          q.quantity,
+          q.leadDays,
+          q.available ? 1 : 0,
+          q.note,
+        );
+        auditPurchase(
+          purchaseId,
+          "quote",
+          `${q.supplierName} round ${q.round}${q.counterUnitMinor !== null ? ` (asked ${formatMinor(q.counterUnitMinor)})` : ""}: ${formatMinor(q.unitMinor)}/unit, ${formatMinor(q.totalMinor)} total, ${q.leadDays} days. ${q.note}`,
+        );
+      }
+      auditPurchase(
+        purchaseId,
+        "recommended",
+        winner
+          ? `${winner.supplierName} at ${formatMinor(winner.totalMinor)}${overruled ? ` (${overruled})` : ""}`
+          : "no supplier fits",
+      );
+      return getPurchase(purchaseId)!;
+    },
+
+    listPurchases(projectId: number): PurchaseView[] {
+      return (
+        db.prepare(`SELECT id FROM purchase WHERE project_id = ? ORDER BY id DESC`).all(projectId) as { id: number }[]
+      ).map((r) => getPurchase(r.id)!);
+    },
+
+    getPurchase,
 
     getMilestone(id: number): MilestoneView | undefined {
       return getMilestoneRow(id) ? view(id) : undefined;

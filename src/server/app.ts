@@ -1,6 +1,8 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
+import { catalogAdapter } from "./catalog";
+import { geminiNegotiator } from "./negotiate";
 import { paypalAdapter } from "./paypal";
 import { createService, type Service } from "./service";
 import { openStore, type SeedOptions } from "./store";
@@ -23,6 +25,8 @@ function boot(): Service {
     seed,
     paypal: paypalAdapter,
     verifier: geminiVerifier,
+    catalog: catalogAdapter,
+    negotiator: geminiNegotiator,
     ownerPasscode: process.env.OWNER_PASSCODE || undefined,
     // Without a fixed secret, sessions and payee links last until the next restart,
     // which is also when the demo data resets.

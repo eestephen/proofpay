@@ -89,3 +89,11 @@ export async function signOut() {
 export async function resetDemo() {
   await run("/", async () => app().resetDemo(await ownerCredential()));
 }
+
+export async function requestMaterials(formData: FormData) {
+  const projectId = Number(formData.get("projectId"));
+  if (!Number.isInteger(projectId) || projectId <= 0) throw new Error("Invalid project id");
+  await run(`/projects/${projectId}`, async () =>
+    app().requestMaterials(projectId, String(formData.get("request") ?? ""), await ownerCredential()),
+  );
+}

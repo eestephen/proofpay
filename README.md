@@ -23,7 +23,11 @@ Built for the PayPal AI Hackathon. Status: walking skeleton. See `docs/brief.md`
    already submitted on another milestone. Each is put **on hold** with the reason shown, even
    if the AI on its own would have said release. The owner can override a hold only by ticking
    a confirmation box, and the override is logged.
-6. **Reset demo** (top right) restores the starting data.
+6. On the project page, use **Buy materials**: the buyer agent reads the request, looks up a real
+   market price through Channel3, then negotiates up to three rounds with three simulated suppliers.
+   The quotes appear side by side. ProofPay rules replace any pick that breaks the budget, deadline
+   or stock. The agent has no payment tools.
+7. **Reset demo** (top right) restores the starting data.
 
 ## Run it locally
 
