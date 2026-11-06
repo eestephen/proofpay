@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { connection } from "next/server";
 import { app } from "@/server/app";
+import { ownerCredential } from "@/server/session";
 import { approveRelease, refreshPayout, submitProof } from "../../actions";
 
 type Props = {
@@ -25,6 +26,9 @@ async function MilestoneCard({ params, searchParams }: Props) {
   const m = app().getMilestone(Number((await params).id));
   if (!m) notFound();
   const error = (await searchParams).error;
+  const credential = await ownerCredential();
+  const owner = app().isOwner(credential);
+  const payeeLink = owner ? `/payee/${m.id}?t=${encodeURIComponent(app().payeeToken(m.id, credential))}` : null;
   const v = m.verification;
   const idField = <input name="milestoneId" type="hidden" value={m.id} />;
 
@@ -50,7 +54,23 @@ async function MilestoneCard({ params, searchParams }: Props) {
           </p>
         </div>
 
-        {m.status === "awaiting_proof" && (
+        {!owner && (
+          <p className="rounded bg-gray-100 p-3 text-sm">
+            Viewing as a visitor. <Link className="underline" href="/login">Sign in as owner</Link> to upload
+            proof or release payment.
+          </p>
+        )}
+
+        {payeeLink && m.status === "awaiting_proof" && (
+          <p className="rounded bg-gray-100 p-3 text-sm">
+            Payee upload link (share with {m.payeeName}):{" "}
+            <Link className="break-all underline" href={payeeLink}>
+              {payeeLink}
+            </Link>
+          </p>
+        )}
+
+        {owner && m.status === "awaiting_proof" && (
           <form action={submitProof} className="space-y-2">
             {idField}
             <p className="font-medium">Payee: upload proof (invoice or work photo)</p>
@@ -83,7 +103,7 @@ async function MilestoneCard({ params, searchParams }: Props) {
           </div>
         )}
 
-        {m.status === "payout_failed" && (
+        {owner && m.status === "payout_failed" && (
           <div className="rounded bg-red-50 p-4" role="alert">
             <p className="font-medium">PayPal payout failed</p>
             <p className="break-all text-sm text-red-800">{m.payoutError}</p>
@@ -96,7 +116,7 @@ async function MilestoneCard({ params, searchParams }: Props) {
           </div>
         )}
 
-        {m.status === "ready" && (
+        {owner && m.status === "ready" && (
           <form action={approveRelease}>
             {idField}
             <button className="rounded bg-blue-600 px-4 py-2 text-white" type="submit">

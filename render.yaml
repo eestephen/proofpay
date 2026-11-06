@@ -14,6 +14,10 @@ services:
         value: SANDBOX
       - key: PAYOUT_CURRENCY
         value: SGD
+      - key: OWNER_PASSCODE
+        value: proofpay-demo
+      - key: SESSION_SECRET
+        generateValue: true
       - key: PAYPAL_CLIENT_ID
         sync: false
       - key: PAYPAL_CLIENT_SECRET

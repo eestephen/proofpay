@@ -1,8 +1,14 @@
+import { randomBytes } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 
 export type SeedOptions = { currency: string; payeeEmail: string; budgetMinor?: number };
 
 const SCHEMA = `
+  DROP TABLE IF EXISTS audit;
+  DROP TABLE IF EXISTS milestone;
+  DROP TABLE IF EXISTS project;
+  DROP TABLE IF EXISTS meta;
+  CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   CREATE TABLE project (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
@@ -66,19 +72,35 @@ const KITCHEN: SeedMilestone[] = [
   ],
 ];
 
+/**
+ * Drops everything and writes the demo seed. A fresh random epoch means payee
+ * links issued before a reset stop working.
+ */
+export function seedStore(db: DatabaseSync, seed: SeedOptions): void {
+  db.exec("BEGIN");
+  try {
+    db.exec(SCHEMA);
+    db.prepare(`INSERT INTO meta (key, value) VALUES ('epoch', ?)`).run(randomBytes(16).toString("hex"));
+    const { lastInsertRowid: projectId } = db
+      .prepare(`INSERT INTO project (name, mode, budget_minor, currency) VALUES (?, 'sme', ?, ?)`)
+      .run("Kitchen renovation, 14 Elm St", seed.budgetMinor ?? 800000, seed.currency);
+    const insert = db.prepare(
+      `INSERT INTO milestone (project_id, position, title, description, amount_minor, payee_name, payee_email)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    KITCHEN.forEach(([title, description, amount, payee], i) =>
+      insert.run(projectId, i + 1, title, description, amount, payee, seed.payeeEmail),
+    );
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+}
+
 /** Opens a SQLite store with a fresh schema and the demo seed data. */
 export function openStore(location: string, seed: SeedOptions): DatabaseSync {
   const db = new DatabaseSync(location);
-  db.exec(SCHEMA);
-  const { lastInsertRowid: projectId } = db
-    .prepare(`INSERT INTO project (name, mode, budget_minor, currency) VALUES (?, 'sme', ?, ?)`)
-    .run("Kitchen renovation, 14 Elm St", seed.budgetMinor ?? 800000, seed.currency);
-  const insert = db.prepare(
-    `INSERT INTO milestone (project_id, position, title, description, amount_minor, payee_name, payee_email)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  );
-  KITCHEN.forEach(([title, description, amount, payee], i) =>
-    insert.run(projectId, i + 1, title, description, amount, payee, seed.payeeEmail),
-  );
+  seedStore(db, seed);
   return db;
 }

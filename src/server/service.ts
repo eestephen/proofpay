@@ -1,6 +1,8 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { checkRelease, formatMinor, type MilestoneStatus } from "@/domain/release";
 import type { PayPalPort, ProofFile, VerifierPort } from "./ports";
+import { seedStore, type SeedOptions } from "./store";
 import type { Verification } from "./verify";
 
 export type Fund = { budget: string; released: string; remaining: string; currency: string };
@@ -37,7 +39,22 @@ export type AuditEntry = { at: string; kind: AuditKind; detail: string };
 
 export type ProjectView = ProjectSummary & { milestones: MilestoneView[] };
 
-export type Deps = { db: DatabaseSync; paypal: PayPalPort; verifier: VerifierPort };
+export type Deps = {
+  db: DatabaseSync;
+  seed: SeedOptions;
+  paypal: PayPalPort;
+  verifier: VerifierPort;
+  /** Owner sign-in is disabled when unset. */
+  ownerPasscode: string | undefined;
+  /** Signs owner sessions and payee links. */
+  secret: string;
+};
+
+/** What a payee sees through their upload link: no audit trail. */
+export type PayeeView = Omit<MilestoneView, "history">;
+
+/** An owner session token or a payee link token, as presented by the caller. */
+export type Credential = string | null | undefined;
 
 type ProjectRow = {
   id: number;
@@ -111,7 +128,33 @@ function toMilestone(r: MilestoneRow, history: AuditEntry[]): MilestoneView {
   };
 }
 
-export function createService({ db, paypal, verifier }: Deps) {
+function safeEqual(a: string, b: string): boolean {
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
+}
+
+export function createService({ db, seed, paypal, verifier, ownerPasscode, secret }: Deps) {
+  const sign = (value: string) => createHmac("sha256", secret).update(value).digest("base64url");
+  const ownerToken = sign("owner");
+
+  function isOwner(credential: Credential): boolean {
+    return typeof credential === "string" && safeEqual(credential, ownerToken);
+  }
+
+  function requireOwner(credential: Credential) {
+    if (!isOwner(credential)) throw new Error("Owner passcode required");
+  }
+
+  function payeeTokenFor(milestoneId: number): string {
+    const { value: epoch } = db.prepare(`SELECT value FROM meta WHERE key = 'epoch'`).get() as { value: string };
+    return sign(`payee:${epoch}:${milestoneId}`);
+  }
+
+  function isPayee(milestoneId: number, credential: Credential): boolean {
+    return typeof credential === "string" && safeEqual(credential, payeeTokenFor(milestoneId));
+  }
+
   function getMilestoneRow(id: number): MilestoneRow | undefined {
     return db.prepare(`${MILESTONE_SQL} WHERE m.id = ?`).get(id) as MilestoneRow | undefined;
   }
@@ -146,7 +189,35 @@ export function createService({ db, paypal, verifier }: Deps) {
   }
 
   return {
-    async submitProof(id: number, file: ProofFile): Promise<MilestoneView> {
+    ownerSession(passcode: string): string | null {
+      if (!ownerPasscode) return null;
+      return safeEqual(passcode, ownerPasscode) ? ownerToken : null;
+    },
+
+    isOwner,
+
+    /** The token for a milestone's private payee upload link. Owner only. */
+    payeeToken(id: number, credential: Credential): string {
+      requireOwner(credential);
+      mustGet(id);
+      return payeeTokenFor(id);
+    },
+
+    getPayeeView(id: number, credential: Credential): PayeeView | undefined {
+      if (!getMilestoneRow(id) || !isPayee(id, credential)) return undefined;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { history, ...rest } = view(id);
+      return rest;
+    },
+
+    resetDemo(credential: Credential): void {
+      requireOwner(credential);
+      seedStore(db, seed);
+    },
+
+    /** Owner or the milestone's own payee may submit proof. */
+    async submitProof(id: number, file: ProofFile, credential: Credential): Promise<MilestoneView> {
+      if (!isOwner(credential) && !isPayee(id, credential)) throw new Error("Invalid upload link");
       if (!file.mediaType.startsWith("image/")) throw new Error("Proof must be an image");
       if (file.data.byteLength === 0) throw new Error("Proof file is empty");
       const row = mustGet(id);
@@ -191,7 +262,8 @@ export function createService({ db, paypal, verifier }: Deps) {
      * Owner approval. Sends one PayPal payout. A PayPal failure does not throw:
      * the milestone moves to payout_failed with the error, and can be retried.
      */
-    async approveRelease(id: number): Promise<MilestoneView> {
+    async approveRelease(id: number, credential: Credential): Promise<MilestoneView> {
+      requireOwner(credential);
       const row = mustGet(id);
       const p = project(row.project_id)!;
       const check = checkRelease({
