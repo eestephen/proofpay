@@ -9,7 +9,9 @@ const SCHEMA = `
   DROP TABLE IF EXISTS milestone;
   DROP TABLE IF EXISTS project;
   DROP TABLE IF EXISTS meta;
+  DROP TABLE IF EXISTS webhook_event;
   CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  CREATE TABLE webhook_event (id TEXT PRIMARY KEY, type TEXT NOT NULL, received_at TEXT NOT NULL);
   CREATE TABLE project (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,

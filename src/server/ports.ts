@@ -31,4 +31,6 @@ export interface PayPalPort {
     note: string;
   }): Promise<{ batchId: string; status: string }>;
   getPayoutStatus(batchId: string): Promise<string>;
+  /** Asks PayPal whether a webhook delivery is genuine. `body` is the raw request body. */
+  verifyWebhook(headers: Record<string, string>, body: string): Promise<boolean>;
 }

@@ -1,6 +1,6 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import { checkRelease, formatMinor, parseAmountMinor, type MilestoneStatus } from "@/domain/release";
+import { checkRelease, formatMinor, nextPayoutStatus, parseAmountMinor, type MilestoneStatus } from "@/domain/release";
 import { PayoutRejected, type PayPalPort, type ProofFile, type VerifierPort } from "./ports";
 import { seedStore, type SeedOptions } from "./store";
 import type { Verification } from "./verify";
@@ -69,8 +69,28 @@ export type Deps = {
 
 export const OWNER_SESSION_MS = 12 * 60 * 60 * 1000;
 
-/** PayPal batch statuses that mean the money did not go out. */
-const FAILED_BATCH = new Set(["DENIED", "FAILED", "CANCELED"]);
+export type WebhookDelivery = { headers: Record<string, string>; body: string };
+
+export type WebhookResult = { result: "applied" | "ignored" | "duplicate" | "rejected"; reason: string };
+
+/** Pulls the batch id and status out of a PayPal payout batch or payout item event. */
+function payoutEvent(event: {
+  event_type?: string;
+  resource?: {
+    payout_batch_id?: string;
+    transaction_status?: string;
+    batch_header?: { payout_batch_id?: string; batch_status?: string };
+  };
+}): { batchId: string; status: string } | null {
+  const r = event.resource;
+  if (event.event_type?.startsWith("PAYMENT.PAYOUTS-ITEM.") && r?.payout_batch_id && r.transaction_status) {
+    return { batchId: r.payout_batch_id, status: r.transaction_status };
+  }
+  if (event.event_type?.startsWith("PAYMENT.PAYOUTSBATCH.") && r?.batch_header?.payout_batch_id && r.batch_header.batch_status) {
+    return { batchId: r.batch_header.payout_batch_id, status: r.batch_header.batch_status };
+  }
+  return null;
+}
 
 /** What a payee sees through their upload link: no audit trail. */
 export type PayeeView = Omit<MilestoneView, "history">;
@@ -243,6 +263,27 @@ export function createService({ db, seed, paypal, verifier, ownerPasscode, secre
 
   function view(id: number): MilestoneView {
     return toMilestone(mustGet(id), currentFiles(id), history(id));
+  }
+
+  /**
+   * Records a payout status PayPal reported. A failure moves the milestone back
+   * to payout_failed and out of the released total; otherwise status only moves
+   * forward. Returns whether anything changed.
+   */
+  function applyPayoutStatus(row: MilestoneRow, status: string, source: string): boolean {
+    if (row.status !== "paid" || !row.payout_batch_id) return false;
+    const next = nextPayoutStatus(row.payout_status, status);
+    if (!next.apply) return false;
+    if (next.failed) {
+      db.prepare(
+        `UPDATE milestone SET status = 'payout_failed', payout_status = ?, payout_error = ?, payout_request_id = NULL WHERE id = ?`,
+      ).run(status, `PayPal batch ${row.payout_batch_id} ended ${status}`, row.id);
+      audit(row.id, "payout_failed", `batch ${row.payout_batch_id}: ${status} (${source})`);
+    } else {
+      db.prepare(`UPDATE milestone SET payout_status = ? WHERE id = ?`).run(status, row.id);
+      audit(row.id, "payout_status", `batch ${row.payout_batch_id}: ${status} (${source})`);
+    }
+    return true;
   }
 
   function project(id: number): ProjectRow | undefined {
@@ -441,18 +482,42 @@ export function createService({ db, seed, paypal, verifier, ownerPasscode, secre
         const started = epoch();
         const status = await paypal.getPayoutStatus(row.payout_batch_id);
         assertSameEpoch(started);
-        if (FAILED_BATCH.has(status)) {
-          // The money did not go out: back to payout_failed, out of the released total, retryable.
-          db.prepare(
-            `UPDATE milestone SET status = 'payout_failed', payout_status = ?, payout_error = ?, payout_request_id = NULL WHERE id = ?`,
-          ).run(status, `PayPal batch ${row.payout_batch_id} ended ${status}`, id);
-          audit(id, "payout_failed", `batch ${row.payout_batch_id}: ${status}`);
-        } else if (status !== row.payout_status) {
-          db.prepare(`UPDATE milestone SET payout_status = ? WHERE id = ?`).run(status, id);
-          audit(id, "payout_status", `batch ${row.payout_batch_id}: ${status}`);
-        }
+        applyPayoutStatus(mustGet(id), status, "manual refresh");
       }
       return view(id);
+    },
+
+    /**
+     * A PayPal webhook delivery. Verified with PayPal before anything changes,
+     * deduplicated by event id, and only ever moves payout status forward.
+     */
+    async handleWebhook(delivery: WebhookDelivery): Promise<WebhookResult> {
+      let event: Parameters<typeof payoutEvent>[0] & { id?: string };
+      try {
+        event = JSON.parse(delivery.body);
+      } catch {
+        return { result: "rejected", reason: "body is not JSON" };
+      }
+      if (typeof event.id !== "string") return { result: "rejected", reason: "event has no id" };
+      const started = epoch();
+      if (!(await paypal.verifyWebhook(delivery.headers, delivery.body))) {
+        return { result: "rejected", reason: "PayPal did not confirm the signature" };
+      }
+      if (epoch() !== started) return { result: "ignored", reason: "demo was reset" };
+      const { changes } = db
+        .prepare(`INSERT OR IGNORE INTO webhook_event (id, type, received_at) VALUES (?, ?, ?)`)
+        .run(event.id, event.event_type ?? "", new Date(now()).toISOString());
+      if (changes === 0) return { result: "duplicate", reason: `event ${event.id} already handled` };
+
+      const payout = payoutEvent(event);
+      if (!payout) return { result: "ignored", reason: `unhandled event type ${event.event_type}` };
+      const row = db.prepare(`${MILESTONE_SQL} WHERE m.payout_batch_id = ?`).get(payout.batchId) as
+        | MilestoneRow
+        | undefined;
+      if (!row) return { result: "ignored", reason: `no milestone for batch ${payout.batchId}` };
+      return applyPayoutStatus(row, payout.status, `webhook ${event.event_type}`)
+        ? { result: "applied", reason: `${payout.batchId}: ${payout.status}` }
+        : { result: "ignored", reason: `${payout.status} does not move ${row.payout_status} forward` };
     },
 
     listProjects(): ProjectSummary[] {

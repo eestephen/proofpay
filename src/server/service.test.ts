@@ -449,3 +449,81 @@ describe("review fixes", () => {
     expect(m.history[0].detail).toMatch(/Gemini down/);
   });
 });
+
+describe("PayPal webhooks (ticket 05)", () => {
+  const event = (id: string, type: string, resource: object) => ({
+    headers: { "paypal-transmission-id": id },
+    body: JSON.stringify({ id, event_type: type, resource }),
+  });
+  const item = (id: string, status: string, batch = "BATCH1") =>
+    event(id, `PAYMENT.PAYOUTS-ITEM.${status === "SUCCESS" ? "SUCCEEDED" : status}`, {
+      payout_batch_id: batch,
+      transaction_status: status,
+    });
+
+  async function paidTiling() {
+    await service.submitProof(tilingId, png, owner);
+    await service.approveRelease(tilingId, owner);
+  }
+
+  it("rejects an event whose signature PayPal does not confirm, changing nothing", async () => {
+    await paidTiling();
+    paypal.rejectWebhooks();
+    expect(await service.handleWebhook(item("WH-1", "SUCCESS"))).toMatchObject({ result: "rejected" });
+    expect(service.getMilestone(tilingId)!.payout?.status).toBe("PENDING");
+  });
+
+  it("marks the payout completed when PayPal reports the item succeeded", async () => {
+    await paidTiling();
+    expect(await service.handleWebhook(item("WH-1", "SUCCESS"))).toMatchObject({ result: "applied" });
+    const m = service.getMilestone(tilingId)!;
+    expect(m.payout?.status).toBe("SUCCESS");
+    expect(m.history[0]).toMatchObject({ kind: "payout_status" });
+    expect(m.history[0].detail).toMatch(/webhook/);
+  });
+
+  it("applies a batch-level event too", async () => {
+    await paidTiling();
+    await service.handleWebhook(
+      event("WH-2", "PAYMENT.PAYOUTSBATCH.SUCCESS", { batch_header: { payout_batch_id: "BATCH1", batch_status: "SUCCESS" } }),
+    );
+    expect(service.getMilestone(tilingId)!.payout?.status).toBe("SUCCESS");
+  });
+
+  it("ignores the same event delivered twice", async () => {
+    await paidTiling();
+    await service.handleWebhook(item("WH-1", "SUCCESS"));
+    expect(await service.handleWebhook(item("WH-1", "SUCCESS"))).toMatchObject({ result: "duplicate" });
+    expect(service.getMilestone(tilingId)!.history.filter((h) => h.kind === "payout_status")).toHaveLength(1);
+  });
+
+  it("never moves status backwards when events arrive out of order", async () => {
+    await paidTiling();
+    await service.handleWebhook(item("WH-1", "SUCCESS"));
+    expect(await service.handleWebhook(item("WH-0", "PENDING"))).toMatchObject({ result: "ignored" });
+    expect(service.getMilestone(tilingId)!.payout?.status).toBe("SUCCESS");
+  });
+
+  it("moves a failed payout item back to payout_failed and restores the fund", async () => {
+    await paidTiling();
+    await service.handleWebhook(item("WH-1", "FAILED"));
+    const m = service.getMilestone(tilingId)!;
+    expect(m.status).toBe("payout_failed");
+    expect(service.listProjects()[0].fund).toMatchObject({ released: "0.00", remaining: "8000.00" });
+  });
+
+  it("ignores events for batches it does not know", async () => {
+    await paidTiling();
+    expect(await service.handleWebhook(item("WH-1", "SUCCESS", "OTHER"))).toMatchObject({ result: "ignored" });
+  });
+
+  it("ignores event types it does not handle", async () => {
+    expect(await service.handleWebhook(event("WH-9", "CHECKOUT.ORDER.APPROVED", {}))).toMatchObject({
+      result: "ignored",
+    });
+  });
+
+  it("rejects a body that is not JSON", async () => {
+    expect(await service.handleWebhook({ headers: {}, body: "not json" })).toMatchObject({ result: "rejected" });
+  });
+});

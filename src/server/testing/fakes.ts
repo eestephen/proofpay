@@ -51,6 +51,7 @@ export function fakePayPal() {
   const payouts: Parameters<PayPalPort["createPayout"]>[0][] = [];
   const statuses = new Map<string, string>();
   let failure: { message: string; definite: boolean } | null = null;
+  let webhooksGenuine = true;
   const port: PayPalPort = {
     async createPayout(input) {
       payouts.push(input);
@@ -66,6 +67,9 @@ export function fakePayPal() {
     async getPayoutStatus(batchId) {
       return statuses.get(batchId) ?? "UNKNOWN";
     },
+    async verifyWebhook() {
+      return webhooksGenuine;
+    },
   };
   return {
     port,
@@ -74,6 +78,10 @@ export function fakePayPal() {
       statuses.set(batchId, status);
     },
     /** The next createPayout call throws this message (and is still recorded). */
+    /** verifyWebhook answers false from now on. */
+    rejectWebhooks() {
+      webhooksGenuine = false;
+    },
     failNext(message: string, opts: { definite?: boolean } = {}) {
       failure = { message, definite: opts.definite ?? true };
     },

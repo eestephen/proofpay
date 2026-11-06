@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { connection } from "next/server";
 import { app } from "@/server/app";
 import { submitProofAsPayee } from "../../actions";
+import { AutoRefresh } from "../../auto-refresh";
 
 type Props = {
   params: Promise<{ id: string }>;
@@ -53,6 +54,8 @@ async function PayeeCard({ params, searchParams }: Props) {
         Status: <b>{STATUS_TEXT[m.status] ?? m.status}</b>
         {m.payout && ` (PayPal: ${m.payout.status})`}
       </p>
+
+      {(m.status === "approved" || (m.status === "paid" && m.payout?.status !== "SUCCESS")) && <AutoRefresh />}
 
       {typeof error === "string" && (
         <p className="mt-3 rounded bg-red-50 p-3 text-red-800" role="alert">

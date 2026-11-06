@@ -35,6 +35,16 @@ cp .env.example .env.local   # then fill in your sandbox keys
 npm run dev
 ```
 
+## PayPal webhooks
+
+Payout status updates arrive at `/api/paypal/webhook`. Each delivery is verified with
+PayPal's verify-webhook-signature API before anything changes, duplicates are ignored, and
+status only moves forward. To receive them on your own deployment, register a webhook on your
+sandbox app (Developer Dashboard > your app > Webhooks) for `https://<your-host>/api/paypal/webhook`
+with the `PAYMENT.PAYOUTS-ITEM.*` and `PAYMENT.PAYOUTSBATCH.*` events. Set `PUBLIC_URL` (Render
+sets `RENDER_EXTERNAL_URL` for you) or `PAYPAL_WEBHOOK_ID`. Locally, without webhooks, the owner
+can use "Refresh status from PayPal".
+
 ## Checks
 
 ```sh

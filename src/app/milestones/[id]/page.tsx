@@ -5,6 +5,7 @@ import { connection } from "next/server";
 import { app } from "@/server/app";
 import { ownerCredential } from "@/server/session";
 import { approveRelease, overrideRelease, refreshPayout, submitProof } from "../../actions";
+import { AutoRefresh } from "../../auto-refresh";
 
 type Props = {
   params: Promise<{ id: string }>;
@@ -159,10 +160,15 @@ async function MilestoneCard({ params, searchParams }: Props) {
           </form>
         )}
 
+        {(m.status === "approved" || (m.status === "paid" && m.payout?.status !== "SUCCESS")) && <AutoRefresh />}
+
         {m.payout && (
           <div className="rounded bg-blue-50 p-4">
             <p>
               PayPal payout batch <code>{m.payout.batchId}</code>: <b>{m.payout.status}</b>
+              {m.payout.status !== "SUCCESS" && (
+                <span className="text-sm text-gray-600"> (updates automatically when PayPal confirms)</span>
+              )}
             </p>
             {owner && (
               <form action={refreshPayout}>

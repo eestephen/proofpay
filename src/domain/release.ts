@@ -48,3 +48,18 @@ export function parseAmountMinor(text: string): number | null {
   const cents = match[2] ? Number(match[2].padEnd(2, "0")) : 0;
   return whole * 100 + cents;
 }
+/** PayPal payout batch/item statuses that mean the money did not reach the payee. */
+export const FAILED_PAYOUT = new Set(["DENIED", "FAILED", "CANCELED", "RETURNED", "BLOCKED", "REVERSED", "REFUNDED"]);
+
+const PAYOUT_RANK: Record<string, number> = { NEW: 0, PENDING: 1, PROCESSING: 2, ONHOLD: 2, UNCLAIMED: 2, SUCCESS: 3 };
+
+/**
+ * Whether a newly reported payout status should replace the current one.
+ * Failures always apply; otherwise status only moves forward.
+ */
+export function nextPayoutStatus(current: string | null, next: string): { apply: boolean; failed: boolean } {
+  if (FAILED_PAYOUT.has(next)) return { apply: true, failed: true };
+  const from = current ? (PAYOUT_RANK[current] ?? 0) : -1;
+  const to = PAYOUT_RANK[next];
+  return { apply: to !== undefined && to > from, failed: false };
+}

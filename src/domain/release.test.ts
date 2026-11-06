@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkRelease, formatMinor, parseAmountMinor } from "./release";
+import { checkRelease, formatMinor, nextPayoutStatus, parseAmountMinor } from "./release";
 
 const enough = { amountMinor: 120000, remainingMinor: 800000 };
 
@@ -64,5 +64,21 @@ describe("checkRelease override", () => {
     const base = { status: "on_hold" as const, ownerApproved: true, amountMinor: 1, remainingMinor: 10 };
     expect(checkRelease(base)).toEqual({ ok: false, reason: "not_ready" });
     expect(checkRelease({ ...base, override: true })).toEqual({ ok: true });
+  });
+});
+
+describe("nextPayoutStatus", () => {
+  it("moves forward through PayPal batch and item statuses", () => {
+    expect(nextPayoutStatus("PENDING", "PROCESSING")).toEqual({ apply: true, failed: false });
+    expect(nextPayoutStatus("PROCESSING", "SUCCESS")).toEqual({ apply: true, failed: false });
+  });
+  it("does not move backwards or repeat", () => {
+    expect(nextPayoutStatus("SUCCESS", "PENDING").apply).toBe(false);
+    expect(nextPayoutStatus("SUCCESS", "SUCCESS").apply).toBe(false);
+  });
+  it("treats denied, failed, returned and similar as failures", () => {
+    for (const s of ["DENIED", "FAILED", "CANCELED", "RETURNED", "BLOCKED", "REVERSED"]) {
+      expect(nextPayoutStatus("PENDING", s)).toEqual({ apply: true, failed: true });
+    }
   });
 });
