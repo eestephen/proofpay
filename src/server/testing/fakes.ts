@@ -28,9 +28,15 @@ export function fakeVerifier(result: Partial<Verification> = {}) {
 export function fakePayPal() {
   const payouts: Parameters<PayPalPort["createPayout"]>[0][] = [];
   const statuses = new Map<string, string>();
+  let failure: string | null = null;
   const port: PayPalPort = {
     async createPayout(input) {
       payouts.push(input);
+      if (failure) {
+        const message = failure;
+        failure = null;
+        throw new Error(message);
+      }
       const batchId = `BATCH${payouts.length}`;
       statuses.set(batchId, "PENDING");
       return { batchId, status: "PENDING" };
@@ -44,6 +50,10 @@ export function fakePayPal() {
     payouts,
     setStatus(batchId: string, status: string) {
       statuses.set(batchId, status);
+    },
+    /** The next createPayout call throws this message (and is still recorded). */
+    failNext(message: string) {
+      failure = message;
     },
   };
 }

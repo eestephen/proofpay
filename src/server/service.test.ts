@@ -123,3 +123,74 @@ describe("refreshing payout status", () => {
     expect(m.payout).toEqual({ batchId: "BATCH1", status: "SUCCESS" });
   });
 });
+
+describe("safe release (ticket 04)", () => {
+  function make(budgetMinor?: number) {
+    const pp = fakePayPal();
+    const svc = createService({
+      db: openStore(":memory:", { currency: "SGD", payeeEmail: "payee@example.com", budgetMinor }),
+      paypal: pp.port,
+      verifier: fakeVerifier().port,
+    });
+    const tilingId = svc.getProject(svc.listProjects()[0].id)!.milestones[1].id;
+    return { svc, pp, tilingId };
+  }
+
+  it("refuses a release that would exceed the remaining project fund", async () => {
+    const { svc, pp, tilingId } = make(100000); // 1,000 SGD budget, milestone is 1,200
+    await svc.submitProof(tilingId, png);
+    await expect(svc.approveRelease(tilingId)).rejects.toThrow(/insufficient_fund/);
+    expect(pp.payouts).toHaveLength(0);
+  });
+
+  it("sends exactly one payout when approve is clicked twice at once", async () => {
+    const { svc, pp, tilingId } = make();
+    await svc.submitProof(tilingId, png);
+    const results = await Promise.allSettled([svc.approveRelease(tilingId), svc.approveRelease(tilingId)]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(pp.payouts).toHaveLength(1);
+  });
+
+  it("keeps a failed payout visible and the fund untouched", async () => {
+    const { svc, pp, tilingId } = make();
+    await svc.submitProof(tilingId, png);
+    pp.failNext("PayPal payout failed: 422 INSUFFICIENT_FUNDS");
+    const m = await svc.approveRelease(tilingId);
+    expect(m.status).toBe("payout_failed");
+    expect(m.payoutError).toMatch(/INSUFFICIENT_FUNDS/);
+    expect(svc.listProjects()[0].fund).toMatchObject({ released: "0.00", remaining: "8000.00" });
+  });
+
+  it("retries a failed payout with a new request id and then pays", async () => {
+    const { svc, pp, tilingId } = make();
+    await svc.submitProof(tilingId, png);
+    pp.failNext("boom");
+    await svc.approveRelease(tilingId);
+    const m = await svc.approveRelease(tilingId);
+    expect(m.status).toBe("paid");
+    expect(m.payoutError).toBeNull();
+    expect(pp.payouts).toHaveLength(2);
+    expect(pp.payouts[0].requestId).not.toBe(pp.payouts[1].requestId);
+    expect(svc.listProjects()[0].fund).toMatchObject({ released: "1200.00", remaining: "6800.00" });
+  });
+
+  it("records every step in the audit trail, newest first", async () => {
+    const { svc, pp, tilingId } = make();
+    await svc.submitProof(tilingId, png);
+    pp.failNext("boom");
+    await svc.approveRelease(tilingId);
+    await svc.approveRelease(tilingId);
+    pp.setStatus("BATCH2", "SUCCESS");
+    const m = await svc.refreshPayout(tilingId);
+    expect(m.history.map((h) => h.kind)).toEqual([
+      "payout_status",
+      "payout_sent",
+      "approved",
+      "payout_failed",
+      "approved",
+      "verified",
+      "proof_submitted",
+    ]);
+    expect(m.history.find((h) => h.kind === "payout_failed")?.detail).toMatch(/boom/);
+  });
+});

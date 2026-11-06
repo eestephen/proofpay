@@ -4,23 +4,28 @@ export type MilestoneStatus =
   | "ready"
   | "on_hold"
   | "approved"
+  | "payout_failed"
   | "paid";
 
-export type ReleaseCheck =
-  | { ok: true }
-  | { ok: false; reason: "not_ready" | "already_paid" | "not_approved" };
+export type ReleaseRefusal = "not_ready" | "already_paid" | "not_approved" | "insufficient_fund";
+
+export type ReleaseCheck = { ok: true } | { ok: false; reason: ReleaseRefusal };
 
 /**
  * Guard that runs before any payout call. A payout needs proof the verifier
- * marked ready and an explicit owner approval, and never runs twice.
+ * marked ready (or a failed payout being retried), an explicit owner approval,
+ * enough project fund left, and never runs twice.
  */
 export function checkRelease(input: {
   status: MilestoneStatus;
   ownerApproved: boolean;
+  amountMinor: number;
+  remainingMinor: number;
 }): ReleaseCheck {
   if (input.status === "paid") return { ok: false, reason: "already_paid" };
-  if (input.status !== "ready") return { ok: false, reason: "not_ready" };
+  if (input.status !== "ready" && input.status !== "payout_failed") return { ok: false, reason: "not_ready" };
   if (!input.ownerApproved) return { ok: false, reason: "not_approved" };
+  if (input.amountMinor > input.remainingMinor) return { ok: false, reason: "insufficient_fund" };
   return { ok: true };
 }
 

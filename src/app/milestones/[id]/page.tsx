@@ -5,20 +5,26 @@ import { connection } from "next/server";
 import { app } from "@/server/app";
 import { approveRelease, refreshPayout, submitProof } from "../../actions";
 
-export default function Page({ params }: { params: Promise<{ id: string }> }) {
+type Props = {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+};
+
+export default function Page({ params, searchParams }: Props) {
   return (
     <main className="mx-auto max-w-2xl p-8 font-sans">
       <Suspense fallback={<p>Loading milestone…</p>}>
-        <MilestoneCard params={params} />
+        <MilestoneCard params={params} searchParams={searchParams} />
       </Suspense>
     </main>
   );
 }
 
-async function MilestoneCard({ params }: { params: Promise<{ id: string }> }) {
+async function MilestoneCard({ params, searchParams }: Props) {
   await connection();
   const m = app().getMilestone(Number((await params).id));
   if (!m) notFound();
+  const error = (await searchParams).error;
   const v = m.verification;
   const idField = <input name="milestoneId" type="hidden" value={m.id} />;
 
@@ -27,6 +33,11 @@ async function MilestoneCard({ params }: { params: Promise<{ id: string }> }) {
       <Link className="text-sm underline" href={`/projects/${m.projectId}`}>
         ← {m.projectName}
       </Link>
+      {typeof error === "string" && (
+        <p className="mt-3 rounded bg-red-50 p-3 text-red-800" role="alert">
+          {error}
+        </p>
+      )}
       <section className="mt-3 space-y-4 rounded-lg border p-6">
         <div>
           <h1 className="text-xl font-semibold">{m.title}</h1>
@@ -72,6 +83,19 @@ async function MilestoneCard({ params }: { params: Promise<{ id: string }> }) {
           </div>
         )}
 
+        {m.status === "payout_failed" && (
+          <div className="rounded bg-red-50 p-4" role="alert">
+            <p className="font-medium">PayPal payout failed</p>
+            <p className="break-all text-sm text-red-800">{m.payoutError}</p>
+            <form action={approveRelease}>
+              {idField}
+              <button className="mt-2 rounded bg-blue-600 px-4 py-2 text-white" type="submit">
+                Retry payout of {m.amount} {m.currency}
+              </button>
+            </form>
+          </div>
+        )}
+
         {m.status === "ready" && (
           <form action={approveRelease}>
             {idField}
@@ -95,6 +119,20 @@ async function MilestoneCard({ params }: { params: Promise<{ id: string }> }) {
           </div>
         )}
       </section>
+
+      {m.history.length > 0 && (
+        <section className="mt-6">
+          <h2 className="mb-2 font-semibold">Audit trail</h2>
+          <ol className="space-y-1 text-sm">
+            {m.history.map((h) => (
+              <li className="border-l-2 pl-3" key={`${h.at}-${h.kind}-${h.detail}`}>
+                <span className="text-gray-500">{new Date(h.at).toLocaleString("en-SG")}</span>{" "}
+                <code>{h.kind}</code> {h.detail}
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
     </>
   );
 }
