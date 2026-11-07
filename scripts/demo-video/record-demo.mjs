@@ -199,7 +199,7 @@ if (await approve.count()) {
 await s;
 await pause(1500);
 
-// 8. More scenarios: wrong payee (cafe) and fund limit (bathroom). Prep off camera.
+// 8. More scenarios: wrong payee (event company) and fund limit (digital agency). Prep off camera.
 await cut("preparing scenarios", async () => {
   const pay = async (id, file) => {
     await page.goto(`${base}/milestones/${id}`);
@@ -210,15 +210,15 @@ await cut("preparing scenarios", async () => {
     await page.getByText(/PayPal payout batch/).waitFor({ timeout: 60_000 });
     await page.waitForTimeout(13_000);
   };
-  await pay(9, "bath-waterproofing-ok.png");
-  await pay(10, "bath-tiling-ok.png");
+  await pay(9, "web-design-ok.png");
+  await pay(10, "web-build-ok.png");
   await page.goto(`${base}/milestones/11`);
-  await page.setInputFiles('input[name="proof"]', `${demo}\\bath-fittings-ok.png`);
+  await page.setInputFiles('input[name="proof"]', `${demo}\\web-launch-ok.png`);
   await page.getByRole("button", { name: /Submit proof/ }).click();
   await page.getByRole("button", { name: /approve and release/ }).waitFor({ timeout: 180_000 });
   await page.waitForTimeout(13_000);
   await page.goto(`${base}/milestones/6`);
-  await page.setInputFiles('input[name="proof"]', `${demo}\\cafe-counter-wrong-payee.png`);
+  await page.setInputFiles('input[name="proof"]', `${demo}\\event-photo-wrong-payee.png`);
   await page.getByRole("button", { name: /Submit proof/ }).click();
   await page.getByText(/AI verifier recommends/).waitFor({ timeout: 180_000 });
 });
