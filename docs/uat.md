@@ -7,12 +7,15 @@
 - `invoice-ok.png`: a clean tiling invoice, 1,200.00
 - `invoice-inflated.png`: a tiling invoice with a total of 1,850.00
 - `invoice-injection.png`: has faint text telling the AI to approve it
-- `invoice-ngo-cleanup.png`: a clean NGO clean-up invoice, 1,200.00
+- `cafe-electrical-ok.png`, `cafe-counter-wrong-payee.png`, `cafe-signage-vague.png`, `cafe-cleaning-lowball.png`: cafe scenarios
+- `bath-waterproofing-ok.png`, `bath-tiling-ok.png`, `bath-fittings-ok.png`: bathroom budget scenario
+
+You can also download every file from the site's **Demo scenarios** page.
 
 **Before you start:**
 
 - Use two browser windows. **Window A** is a normal window: you are the owner. **Window B** is a
-  private/incognito window: you are the payee, donor or visitor.
+  private/incognito window: you are the payee or a visitor.
 - If the site has been idle, the first load takes about a minute.
 - In Window A, sign in and click **Reset demo**.
 
@@ -24,7 +27,7 @@ Fill in **Result** with Pass, Fail or a note. For any Fail, take a screenshot.
 
 | # | Steps | Expected | Result |
 |---|---|---|---|
-| A1 | Window B: open the site. | The home page shows SME mode and the Kitchen renovation project with budget 8000.00 SGD. The header says "Owner sign in". | |
+| A1 | Window B: open the site. | The home page lists 3 projects (Kitchen 8000.00, Cafe 12000.00, Bathroom 3000.00 SGD). The header shows "Demo scenarios" and "Owner sign in". | |
 | A2 | Window B: open Kitchen renovation, then Stage 2. | "Viewing as a visitor". No upload form, no approve button, no payee email, no audit trail. | |
 | A3 | Window A: click **Owner sign in** and enter `wrong`. | "Wrong passcode" error. Not signed in. | |
 | A4 | Window A: sign in with `proofpay-demo`. | The header shows "Signed in as owner", "Reset demo" and "Sign out". | |
@@ -72,22 +75,27 @@ Window A (owner), using the upload form on each milestone page.
 
 Channel3 returns different products on each run, so prices change between runs. That's expected.
 
-## E. NGO mode and donor page
+## E. More scenarios (Cafe and Bathroom)
+
+Window A, signed in. Leave about 15 seconds between uploads (free AI tier).
 
 | # | Steps | Expected | Result |
 |---|---|---|---|
-| E1 | Home page: click **NGO: relief projects and donors**. | Only "Flood recovery, Kampung Baru" (budget 5000.00) is shown, with a "Public donor impact page" link. | |
-| E2 | Open the project, then Phase 1. | The page says "NGO mode", "Field partner upload link" and "Coordinator: approve…". | |
-| E3 | Upload `invoice-ngo-cleanup.png` and approve. | RELEASE, then a payout is sent. | |
-| E4 | Phase 2: upload `invoice-ok.png` (the kitchen invoice). | **HOLD**, because the payee and scope don't match the water-filter phase. | |
-| E5 | Window B (not signed in): open the donor impact page. | It shows "1200.00 SGD of 5000.00 SGD released", Phase 1 paid to the Residents' Committee with the invoice image. No email addresses, no payout batch IDs, no AI reasons. Phase 2 (on hold) isn't listed. | |
-| E6 | Optional: on the NGO project, ask the buyer agent (default water filters) and approve. | The donor page lists the supply under "Relief supplies bought". | |
-
+| E1 | Open **Demo scenarios** from the header. | 12 numbered scenarios, each with a project or milestone link, a download link and the expected result. | |
+| E2 | Cafe → Service counter carpentry: upload `cafe-counter-wrong-payee.png`. | **HOLD**: the invoice is from QuickFix Handyman, not Ong Carpentry. | |
+| E3 | Cafe → Shopfront signage: upload `cafe-signage-vague.png`. | **HOLD**: "misc. works" doesn't evidence the signage work. | |
+| E4 | Cafe → Deep clean and handover: upload `cafe-cleaning-lowball.png`. | **HOLD**, with a red fraud check: total far below the milestone amount. | |
+| E5 | Cafe → Electrical rewiring and lighting: upload `cafe-electrical-ok.png` and approve. | **RELEASE**, and a payout is sent. | |
+| E6 | Cafe project page. | The grid shows 3 on hold, 1 paid, and fraud-check counts. | |
+| E7 | Bathroom → Waterproofing: upload `bath-waterproofing-ok.png` and approve. Then Wall and floor tiling: upload `bath-tiling-ok.png` and approve. | Both paid. Remaining is 400.00. | |
+| E8 | Bathroom → Sanitary fittings: upload `bath-fittings-ok.png` (RELEASE), then click approve. | "Release refused: the project fund does not have enough left for this payment." No payout is sent. | |
+| E9 | Bathroom project page: ask the buyer agent with its default request (grout). | A recommendation within 400 SGD, or "No supplier fits". Never a pick over the budget. | |
+| E10 | Cafe project page: ask the buyer agent with its default request (pendant lights). | Three supplier quotes and a recommendation. | |
 ## F. Reset and sign-out
 
 | # | Steps | Expected | Result |
 |---|---|---|---|
-| F1 | Window A: click **Reset demo**. | Both projects are back to Released 0.00, every milestone is "Awaiting proof", and no purchases remain. | |
+| F1 | Window A: click **Reset demo**. | All three projects are back to Released 0.00, every milestone is "Awaiting proof", and no purchases remain. | |
 | F2 | Window B: open the old payee link from B3. | "invalid or has expired". | |
 | F3 | Window A: click **Sign out**, then open a milestone. | Visitor view, with no action buttons. | |
 
@@ -101,7 +109,7 @@ Channel3 returns different products on each run, so prices change between runs. 
 | B. Verified work | | |
 | C. Fraud checks | | |
 | D. Buyer agent | | |
-| E. NGO mode | | |
+| E. More scenarios | | |
 | F. Reset | | |
 
 Tester: ____________  Date: ____________

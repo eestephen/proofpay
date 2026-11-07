@@ -40,7 +40,6 @@ beforeEach(() => {
 describe("seeded project", () => {
   it("lists the kitchen renovation with its full fund remaining", () => {
     const [project] = service.listProjects();
-    expect(project.mode).toBe("sme");
     expect(project.name).toBe("Kitchen renovation, 14 Elm St");
     expect(project.fund).toEqual({
       budget: "8000.00",
@@ -762,61 +761,6 @@ describe("supplier order (ticket 08)", () => {
   });
 });
 
-describe("NGO mode and donor impact page (ticket 09)", () => {
-  const ngo = () => service.listProjects().find((p) => p.mode === "ngo")!;
-
-  it("seeds a flood-recovery project for NGO mode, with field partners", () => {
-    const p = ngo();
-    expect(p.name).toMatch(/Flood recovery/);
-    expect(p.fund.budget).toBe("5000.00");
-    expect(service.listProjects({ mode: "ngo" })).toHaveLength(1);
-    expect(service.listProjects({ mode: "sme" }).map((x) => x.mode)).toEqual(["sme"]);
-    expect(service.getProject(p.id)!.milestones).toHaveLength(4);
-  });
-
-  it("shows donors only paid milestones, with proof, and no private fields", async () => {
-    const project = service.getProject(ngo().id)!;
-    const [first, second] = project.milestones;
-    await service.submitProof(first.id, png, owner);
-    await service.approveRelease(first.id, owner);
-    verifier.willReturn({ recommendation: "hold" });
-    await service.submitProof(second.id, { data: new Uint8Array([9, 9, 9]), mediaType: "image/png" }, owner);
-
-    const impact = service.getImpact(project.id)!;
-    expect(impact.name).toBe(project.name);
-    expect(impact.fund).toMatchObject({ budget: "5000.00", released: first.amount });
-    expect(impact.paid).toHaveLength(1);
-    expect(impact.paid[0]).toMatchObject({ title: first.title, partner: first.payeeName, amount: first.amount });
-    expect(impact.paid[0].proof).toHaveLength(1);
-    expect(impact.paid[0].paidAt).toBeTruthy();
-    const json = JSON.stringify(impact);
-    for (const secret of ["payee@example.com", "verification", "reasons", "history", "BATCH", PASSCODE, owner]) {
-      expect(json).not.toContain(secret);
-    }
-  });
-
-  it("lists relief supplies that were ordered", async () => {
-    const id = ngo().id;
-    const p = await service.requestMaterials(id, "Buy 40 m2 of tarpaulin, max 1,300 SGD, within 5 days", owner);
-    await service.approveQuote(p.id, owner);
-    const impact = service.getImpact(id)!;
-    expect(impact.supplies).toHaveLength(1);
-    expect(impact.supplies[0]).toMatchObject({ quantity: 40, supplierName: p.recommendation!.supplierName });
-  });
-
-  it("has no public impact page for SME projects", () => {
-    expect(service.getImpact(service.listProjects({ mode: "sme" })[0].id)).toBeUndefined();
-  });
-
-  it("restores the NGO project on reset", async () => {
-    const m = service.getProject(ngo().id)!.milestones[0];
-    await service.submitProof(m.id, png, owner);
-    await service.approveRelease(m.id, owner);
-    service.resetDemo(owner);
-    expect(ngo().fund.released).toBe("0.00");
-  });
-});
-
 describe("hardening review fixes", () => {
   const ask = "Buy 40 m2 of porcelain floor tiles, max 1,300 SGD, within 5 days";
   const hook = (id: string, type: string, resource: object) => ({ headers: {}, body: JSON.stringify({ id, event_type: type, resource }) });
@@ -899,5 +843,31 @@ describe("hardening review fixes", () => {
     await service.handleWebhook(hook("SAME", "CHECKOUT.ORDER.APPROVED", {}));
     await service.handleWebhook(hook("SAME", "CHECKOUT.ORDER.APPROVED", {}));
     expect(verifications).toBe(1);
+  });
+});
+
+describe("demo scenarios", () => {
+  it("seeds three SME projects with their own sample purchase requests", () => {
+    const ps = service.listProjects();
+    expect(ps.map((p) => p.name)).toEqual([
+      "Kitchen renovation, 14 Elm St",
+      "Cafe fit-out, 22 Tiong Bahru Rd",
+      "Bathroom remodel, 8 Jalan Kayu",
+    ]);
+    expect(ps.every((p) => p.sampleRequest.length > 20)).toBe(true);
+    expect(ps[1].fund.budget).toBe("12000.00");
+  });
+
+  it("bathroom: the third payout is refused because the fund runs out", async () => {
+    const bath = service.listProjects()[2];
+    const [wp, tile, fit] = service.getProject(bath.id)!.milestones;
+    for (const [m, total, n] of [[wp, "1400.00", 1], [tile, "1200.00", 2], [fit, "1000.00", 3]] as const) {
+      verifier.willReturn({ recommendation: "release", extractedTotal: total });
+      await service.submitProof(m.id, { data: new Uint8Array([n, 4, 2]), mediaType: "image/png" }, owner);
+    }
+    await service.approveRelease(wp.id, owner);
+    await service.approveRelease(tile.id, owner);
+    await expect(service.approveRelease(fit.id, owner)).rejects.toThrow(/insufficient_fund/);
+    expect(service.listProjects()[2].fund.remaining).toBe("400.00");
   });
 });

@@ -7,8 +7,7 @@ AI agents that buy and pay, but only for verified work.
 ## Inspiration
 
 Small renovation firms pay subcontractors deposits and stage payments on trust. Some disappear,
-some invoices are padded, and buying materials means an afternoon of phone calls. NGOs running
-relief projects have the same problems, plus donors who can't see where their money went. AI can
+some invoices are padded, and buying materials means an afternoon of phone calls. The subcontractors who do the work honestly wait weeks to be paid. AI can
 read an invoice, and it can negotiate. We wanted to see whether it could do both without anyone
 having to trust it with the money.
 
@@ -37,10 +36,12 @@ ProofPay holds a project budget and releases it only against proof, in two ways:
    When the owner approves, the supplier is paid with **PayPal Payouts**, the order is recorded
    as a **PayPal invoice** marked paid, and shipment tracking is attached.
 
-The same engine runs in **SME mode** (kitchen renovation) and **NGO mode** (flood recovery). NGO
-mode adds a **public donor impact page**: what was paid, to whom, and the proof, with no private
-details.
+The demo has three projects and 12 guided scenarios (an in-app **Demo scenarios** page with
+downloadable test invoices):
 
+- a kitchen renovation (the happy path, prompt injection, inflated and reused invoices, owner override);
+- a cafe fit-out (wrong payee, vague invoice, deposit instead of completion, clean invoice);
+- a bathroom remodel whose budget runs out, so the third payout is refused before PayPal is called.
 ## How we built it
 
 - **Next.js 16** (App Router, Server Actions) and TypeScript in one codebase, deployed on
@@ -55,7 +56,7 @@ details.
 
 | PayPal capability | How ProofPay uses it |
 |---|---|
-| **Payouts** (`/v1/payments/payouts`) | Pays subcontractors and field partners per verified milestone, and suppliers per approved order. Each attempt uses a `PayPal-Request-Id` and `sender_batch_id`. When the outcome is unclear (network error or 5xx), the retry reuses the same id so PayPal can't pay twice. A definite 4xx rejection gets a new id. |
+| **Payouts** (`/v1/payments/payouts`) | Pays subcontractors per verified milestone, and suppliers per approved order. Each attempt uses a `PayPal-Request-Id` and `sender_batch_id`. When the outcome is unclear (network error or 5xx), the retry reuses the same id so PayPal can't pay twice. A definite 4xx rejection gets a new id. |
 | **Payout status** (`GET /v1/payments/payouts/{id}`) | Manual "Refresh status from PayPal". Denied, failed or returned payouts move the item back to *payout failed*, return the money to the fund and offer a retry. |
 | **Webhooks** + **verify-webhook-signature** | `PAYMENT.PAYOUTS-ITEM.*` and `PAYMENT.PAYOUTSBATCH.*` events update status live. Every delivery is checked with PayPal (raw body embedded verbatim). Events are deduplicated by id, status only moves forward, and failures are final. |
 | **Invoicing** (`/v2/invoicing/invoices`, send, record payment) | Each supplier order becomes a PayPal invoice, recorded as paid against the Payouts batch that settled it. |
@@ -102,7 +103,7 @@ How we keep the AI honest:
   approval. All of it is in an audit trail.
 - The prompt-injection invoice is caught live. The AI quotes the hidden instruction back to you.
 - Real PayPal webhooks, signature-verified, update the page within about 40 seconds.
-- One engine serves both an SME and an NGO.
+- Twelve scenarios, each with a real outcome from Gemini against a purpose-built invoice: wrong payee, vague scope, deposit-only, duplicates, injection, budget exhaustion.
 
 ## What we learned
 
@@ -113,7 +114,7 @@ hard rules.
 ## What's next
 
 - Real supplier and partner onboarding through PayPal, with KYC.
-- PayPal Checkout for donors and clients funding a project.
+- PayPal Checkout for clients funding a project.
 - A second approver for large amounts.
 - Chat-based proof submission.
 

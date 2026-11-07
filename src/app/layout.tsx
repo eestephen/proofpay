@@ -30,6 +30,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <Link className="font-bold" href="/">
             ProofPay
           </Link>
+          <Link className="ml-6 mr-auto underline" href="/scenarios">
+            Demo scenarios
+          </Link>
           <Suspense fallback={null}>
             <OwnerBar />
           </Suspense>

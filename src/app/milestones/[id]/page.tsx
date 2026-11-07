@@ -6,7 +6,6 @@ import { app } from "@/server/app";
 import { ownerCredential } from "@/server/session";
 import { approveRelease, overrideRelease, refreshPayout, submitProof } from "../../actions";
 import { AutoRefresh } from "../../auto-refresh";
-import { WORDS } from "../../words";
 
 type Props = {
   params: Promise<{ id: string }>;
@@ -28,7 +27,6 @@ async function MilestoneCard({ params, searchParams }: Props) {
   const m = app().getMilestone(Number((await params).id));
   if (!m) notFound();
   const error = (await searchParams).error;
-  const w = WORDS[m.projectMode];
   const credential = await ownerCredential();
   const owner = app().isOwner(credential);
   const payeeLink = owner ? `/payee/${m.id}?t=${encodeURIComponent(app().payeeToken(m.id, credential))}` : null;
@@ -62,7 +60,7 @@ async function MilestoneCard({ params, searchParams }: Props) {
           <p className="rounded bg-gray-100 p-3 text-sm">
             Viewing as a visitor.{" "}
             <Link className="underline" href="/login">
-              Sign in as {w.owner.toLowerCase()}
+              Sign in as owner
             </Link>{" "}
             to upload proof or release payment.
           </p>
@@ -70,7 +68,7 @@ async function MilestoneCard({ params, searchParams }: Props) {
 
         {payeeLink && m.status === "awaiting_proof" && (
           <p className="rounded bg-gray-100 p-3 text-sm">
-            {w.payee} upload link (share with {m.payeeName}):{" "}
+            Subcontractor upload link (share with {m.payeeName}):{" "}
             <Link className="break-all underline" href={payeeLink}>
               {payeeLink}
             </Link>
@@ -81,7 +79,7 @@ async function MilestoneCard({ params, searchParams }: Props) {
           <form action={submitProof} className="space-y-2">
             {idField}
             <p className="font-medium">
-              {m.status === "on_hold" ? "Resubmit proof" : `Upload proof on the ${w.payee.toLowerCase()}'s behalf`}
+              {m.status === "on_hold" ? "Resubmit proof" : "Upload proof on the subcontractor's behalf"}
             </p>
             <label className="block text-sm">
               Invoice (PNG, JPEG or WebP, up to 4 MB)
@@ -160,7 +158,7 @@ async function MilestoneCard({ params, searchParams }: Props) {
           <form action={approveRelease}>
             {idField}
             <button className="rounded bg-blue-600 px-4 py-2 text-white" type="submit">
-              {w.owner}: approve and release {m.amount} {m.currency} via PayPal
+              Owner: approve and release {m.amount} {m.currency} via PayPal
             </button>
           </form>
         )}

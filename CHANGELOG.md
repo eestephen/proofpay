@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0 (2026-11-07)
+
+- Removed NGO mode and the donor impact page from the hackathon build (kept in git tag `with-ngo`).
+- Three SME demo projects: kitchen renovation, cafe fit-out, bathroom remodel (budget-limit demo).
+- In-app **Demo scenarios** page with 12 guided scenarios and downloadable test invoices.
+- Seven new scenario invoices: wrong payee, vague line items, deposit instead of completion, and clean invoices.
+- Readable messages for refused releases.
+
 ## 0.1.0 (2026-11-06): milestone 1, demo-ready
 
 - Projects with milestones and a project fund, shown on an AG Grid board with an audit trail.

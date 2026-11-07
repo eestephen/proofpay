@@ -16,12 +16,22 @@ function milestoneId(formData: FormData): number {
   return id;
 }
 
+const FRIENDLY: [RegExp, string][] = [
+  [/insufficient_fund/, "Release refused: the project fund does not have enough left for this payment."],
+  [/already_paid/, "This milestone has already been paid."],
+  [/not_ready/, "Release refused: the proof has not been accepted yet."],
+];
+
+function friendly(message: string): string {
+  return FRIENDLY.find(([re]) => re.test(message))?.[1] ?? message;
+}
+
 async function run(back: string, action: () => Promise<unknown>): Promise<never> {
   let error: string | null = null;
   try {
     await action();
   } catch (err) {
-    error = err instanceof Error ? err.message : String(err);
+    error = friendly(err instanceof Error ? err.message : String(err));
   }
   // redirect() throws, so it must stay outside the try block.
   const sep = back.includes("?") ? "&" : "?";
