@@ -37,7 +37,7 @@ export async function verifyProof(milestone: VerifierInput, images: ProofFile[])
     try {
       const { output } = await generateText({
         model: google(model),
-        maxRetries: 1,
+        maxRetries: 0,
         abortSignal: AbortSignal.timeout(45_000),
         output: Output.object({ schema: verificationSchema }),
         system: SYSTEM,
@@ -58,6 +58,9 @@ export async function verifyProof(milestone: VerifierInput, images: ProofFile[])
     } catch (err) {
       lastError = err;
     }
+  }
+  if (/quota|rate.?limit|RESOURCE_EXHAUSTED|\b429\b/i.test(String(lastError))) {
+    throw new Error("The AI is at its free-tier rate limit right now. Wait about a minute and submit again.");
   }
   throw new Error(`All Gemini models failed. Last error: ${String(lastError)}`);
 }

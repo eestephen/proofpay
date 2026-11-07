@@ -7,7 +7,7 @@ import { fakePayPal, fakeVerifier } from "./testing/fakes";
 
 // Real Channel3 + real Gemini negotiation. No PayPal calls. Run: npm run test:live
 describe("live: buyer agent", () => {
-  it("negotiates a real request within budget and deadline", async () => {
+  it.each([1, 2, 3])("negotiates a real request within budget and deadline (run %i)", async () => {
     const seed = { currency: "SGD", payeeEmail: "p@example.com" };
     const service = createService({
       db: openStore(":memory:", seed),

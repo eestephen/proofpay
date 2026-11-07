@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SupplierDesk, SUPPLIERS, supplierQuote, type Supplier } from "./procurement";
+import { negotiateByRules, SupplierDesk, SUPPLIERS, supplierQuote, type Supplier } from "./procurement";
 
 const s: Supplier = {
   id: "t",
@@ -63,5 +63,33 @@ describe("SupplierDesk", () => {
 
   it("ships three distinct demo suppliers", () => {
     expect(new Set(SUPPLIERS.map((x) => x.id)).size).toBe(3);
+  });
+});
+
+describe("negotiateByRules", () => {
+  const limits = { budgetMinor: 130000, deadlineDays: 5 };
+  it("opens with everyone, counters those that can deliver, and picks the cheapest fit", () => {
+    const desk = new SupplierDesk({ referenceUnitMinor: 3000, quantity: 40 });
+    const r = negotiateByRules((id, c) => desk.ask(id, c), desk.suppliers, [], limits);
+    expect(new Set(desk.quotes.map((q) => q.supplierId)).size).toBe(3);
+    expect(desk.latest("lion-city")!.round).toBe(3);
+    expect(desk.latest("jurong")!.round).toBe(1); // 7 days: not worth countering
+    expect(r.supplierId).toBe("lion-city"); // Kranji's floor is above Lion City's
+    expect(desk.latest("lion-city")!.unitMinor).toBeLessThan(desk.quotes[0].unitMinor);
+  });
+
+  it("continues from rounds the AI already spent", () => {
+    const desk = new SupplierDesk({ referenceUnitMinor: 3000, quantity: 40 });
+    const first = desk.ask("lion-city");
+    negotiateByRules((id, c) => desk.ask(id, c), desk.suppliers, [first], limits);
+    expect(desk.quotes.filter((q) => q.supplierId === "lion-city")).toHaveLength(3);
+  });
+
+  it("returns null when nothing fits", () => {
+    const desk = new SupplierDesk({ referenceUnitMinor: 3000, quantity: 40 });
+    expect(
+      negotiateByRules((id, c) => desk.ask(id, c), desk.suppliers, [], { budgetMinor: 100, deadlineDays: 5 })
+        .supplierId,
+    ).toBeNull();
   });
 });

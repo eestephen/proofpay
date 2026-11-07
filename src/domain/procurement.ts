@@ -216,3 +216,31 @@ export function decideWinner(
       : "is over budget";
   return { winner: best, overruled: `The agent picked ${picked.supplierName}, which ${why}` };
 }
+
+/**
+ * Rule-based negotiation, used when the AI is unavailable (rate limit, outage) so a
+ * purchase request still completes. Opens with any supplier not yet asked, then counters
+ * each supplier at 15% below its latest price until its rounds run out. Picks the cheapest
+ * offer that fits budget, deadline and stock.
+ */
+export function negotiateByRules(
+  ask: (supplierId: string, counterUnitMinor?: number) => Quote,
+  suppliers: { id: string }[],
+  asked: Quote[],
+  limits: { budgetMinor: number; deadlineDays: number },
+): { supplierId: string | null; quotes: Quote[] } {
+  const quotes = [...asked];
+  const latest = (id: string) => quotes.filter((q) => q.supplierId === id).at(-1);
+  for (const s of suppliers) {
+    if (!latest(s.id)) quotes.push(ask(s.id));
+    let q = latest(s.id)!;
+    while (q.round < MAX_ROUNDS && q.available && q.leadDays <= limits.deadlineDays) {
+      q = ask(s.id, Math.round(q.unitMinor * 0.85));
+      quotes.push(q);
+    }
+  }
+  const best = summariseQuotes(quotes, limits)
+    .filter(fits)
+    .sort((a, b) => a.totalMinor - b.totalMinor)[0];
+  return { supplierId: best?.supplierId ?? null, quotes };
+}
