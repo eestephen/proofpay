@@ -49,3 +49,4 @@ next-env.d.ts
 /demo/t0*-*.png
 /demo/t08-*.png
 /demo/t09-*.png
+/demo-video/
