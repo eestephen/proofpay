@@ -851,16 +851,16 @@ describe("demo scenarios", () => {
     const ps = service.listProjects();
     expect(ps.map((p) => p.name)).toEqual([
       "Kitchen renovation, 14 Elm St",
-      "Cafe fit-out, 22 Tiong Bahru Rd",
-      "Bathroom remodel, 8 Jalan Kayu",
+      "Product launch event, Marina Bay",
+      "Website rebuild, Lim's Bakery",
     ]);
     expect(ps.every((p) => p.sampleRequest.length > 20)).toBe(true);
     expect(ps[1].fund.budget).toBe("12000.00");
   });
 
-  it("bathroom: the third payout is refused because the fund runs out", async () => {
-    const bath = service.listProjects()[2];
-    const [wp, tile, fit] = service.getProject(bath.id)!.milestones;
+  it("website: the third payout is refused because the fund runs out", async () => {
+    const web = service.listProjects()[2];
+    const [wp, tile, fit] = service.getProject(web.id)!.milestones;
     for (const [m, total, n] of [[wp, "1400.00", 1], [tile, "1200.00", 2], [fit, "1000.00", 3]] as const) {
       verifier.willReturn({ recommendation: "release", extractedTotal: total });
       await service.submitProof(m.id, { data: new Uint8Array([n, 4, 2]), mediaType: "image/png" }, owner);

@@ -150,7 +150,7 @@ async function negotiateWith(
     // Few steps: each step is one model request against a small per-minute quota.
     stopWhen: [hasToolCall("recommend"), isStepCount(6)],
     system:
-      `You are a buyer agent for a small construction business. Your goal is the LOWEST total price that fits the ` +
+      `You are a buyer agent for a small business. Your goal is the LOWEST total price that fits the ` +
       `budget and the deadline; staying under budget is not enough. Work in as few steps as possible and call tools ` +
       `IN PARALLEL: step 1, call request_quote for every supplier at once. Step 2, counter-offer every supplier that ` +
       `can meet the deadline and quantity at once, starting well below the reference price. Optionally one more ` +

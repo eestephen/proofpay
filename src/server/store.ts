@@ -132,51 +132,51 @@ const KITCHEN: SeedMilestone[] = [
   ],
 ];
 
-const CAFE: SeedMilestone[] = [
+const EVENT: SeedMilestone[] = [
   [
-    "Electrical rewiring and lighting",
-    "Rewire the shop unit to the new layout, install 14 pendant lights and 6 power points, and provide the certificate of compliance.",
+    "AV and sound setup",
+    "Supply and run the sound system, 2 LED screens and stage lighting for the 150-guest product launch, including rehearsal.",
     280000,
-    "Volt Electrical Pte Ltd",
+    "Pulse AV Productions",
   ],
   [
-    "Service counter carpentry",
-    "Build and install the 4 m service counter with a quartz top, display shelving and under-counter storage.",
-    350000,
-    "Ong Carpentry",
+    "Event photography",
+    "Photograph the launch from doors-open to close and deliver 200 edited photos within 3 days.",
+    180000,
+    "Aperture Studio",
   ],
   [
-    "Shopfront signage",
-    "Fabricate and mount the illuminated shopfront sign (2.4 m x 0.6 m) and window decals.",
+    "Stage backdrop and printing",
+    "Design, print and install the 6 m x 3 m stage backdrop, 2 roll-up banners and table signage.",
     160000,
-    "BrightSign Studio",
+    "PrintHaus SG",
   ],
   [
-    "Deep clean and handover",
-    "Post-construction deep clean of the whole unit, ready for opening day.",
-    60000,
-    "Sparkle Cleaning Services",
+    "Catering for 150 guests",
+    "Canapes, drinks and service staff for 150 guests over 3 hours.",
+    450000,
+    "Spice Route Catering",
   ],
 ];
 
-const BATHROOM: SeedMilestone[] = [
+const WEBSITE: SeedMilestone[] = [
   [
-    "Waterproofing",
-    "Strip the old floor, apply a two-coat waterproofing membrane and run a 24-hour flood test.",
+    "Design mockups",
+    "Homepage, menu and order page designs for desktop and mobile, with two rounds of revisions.",
     140000,
-    "AquaSeal Waterproofing",
+    "Studio Kiwi Design",
   ],
   [
-    "Wall and floor tiling",
-    "Tile 18 m2 of bathroom walls and floor, including grout and sealing.",
+    "Front-end build",
+    "Build the approved designs as a responsive website, including the online order form.",
     120000,
-    "Tan Tiling Works",
+    "Arjun Rao (freelance developer)",
   ],
   [
-    "Sanitary fittings",
-    "Install the vanity, WC, shower set and accessories, and test for leaks.",
+    "Launch and SEO setup",
+    "Domain and hosting setup, go-live, Google Business profile and basic SEO.",
     100000,
-    "Rahman M&E Contractors",
+    "Nora Tan Digital",
   ],
 ];
 /**
@@ -195,7 +195,7 @@ export function seedStore(db: DatabaseSync, seed: SeedOptions): void {
       `INSERT INTO milestone (project_id, position, title, description, amount_minor, payee_name, payee_email)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     );
-    // The bathroom budget (3,000) is deliberately below its milestones (3,600) to demo the fund limit.
+    // The website budget (3,000) is deliberately below its milestones (3,600) to demo the fund limit.
     const projects: [string, string, number, SeedMilestone[]][] = [
       [
         "Kitchen renovation, 14 Elm St",
@@ -204,16 +204,16 @@ export function seedStore(db: DatabaseSync, seed: SeedOptions): void {
         KITCHEN,
       ],
       [
-        "Cafe fit-out, 22 Tiong Bahru Rd",
-        "Buy 14 pendant lights for the cafe, max 1,500 SGD, delivered within 4 days",
+        "Product launch event, Marina Bay",
+        "Buy 150 folding chairs for the event, max 2,500 SGD, delivered within 4 days",
         1200000,
-        CAFE,
+        EVENT,
       ],
       [
-        "Bathroom remodel, 8 Jalan Kayu",
-        "Buy 20 bags of tile grout, max 400 SGD, delivered within 3 days",
+        "Website rebuild, Lim's Bakery",
+        "Buy 2 USB-C monitors for the developers, max 500 SGD, delivered within 3 days",
         300000,
-        BATHROOM,
+        WEBSITE,
       ],
     ];
     for (const [name, sampleRequest, budget, milestones] of projects) {

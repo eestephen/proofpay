@@ -7,8 +7,8 @@
 - `invoice-ok.png`: a clean tiling invoice, 1,200.00
 - `invoice-inflated.png`: a tiling invoice with a total of 1,850.00
 - `invoice-injection.png`: has faint text telling the AI to approve it
-- `cafe-electrical-ok.png`, `cafe-counter-wrong-payee.png`, `cafe-signage-vague.png`, `cafe-cleaning-lowball.png`: cafe scenarios
-- `bath-waterproofing-ok.png`, `bath-tiling-ok.png`, `bath-fittings-ok.png`: bathroom budget scenario
+- `event-av-ok.png`, `event-photo-wrong-payee.png`, `event-backdrop-vague.png`, `event-catering-deposit.png`: event-company scenarios
+- `web-design-ok.png`, `web-build-ok.png`, `web-launch-ok.png`: digital-agency budget scenario
 
 You can also download every file from the site's **Demo scenarios** page.
 
@@ -27,7 +27,7 @@ Fill in **Result** with Pass, Fail or a note. For any Fail, take a screenshot.
 
 | # | Steps | Expected | Result |
 |---|---|---|---|
-| A1 | Window B: open the site. | The home page lists 3 projects (Kitchen 8000.00, Cafe 12000.00, Bathroom 3000.00 SGD). The header shows "Demo scenarios" and "Owner sign in". | |
+| A1 | Window B: open the site. | The home page lists 3 projects (Kitchen 8000.00, Product launch event 12000.00, Website rebuild 3000.00 SGD). The header shows "Demo scenarios" and "Owner sign in". | |
 | A2 | Window B: open Kitchen renovation, then Stage 2. | "Viewing as a visitor". No upload form, no approve button, no payee email, no audit trail. | |
 | A3 | Window A: click **Owner sign in** and enter `wrong`. | "Wrong passcode" error. Not signed in. | |
 | A4 | Window A: sign in with `proofpay-demo`. | The header shows "Signed in as owner", "Reset demo" and "Sign out". | |
@@ -75,22 +75,22 @@ Window A (owner), using the upload form on each milestone page.
 
 Channel3 returns different products on each run, so prices change between runs. That's expected.
 
-## E. More scenarios (Cafe and Bathroom)
+## E. More scenarios (events company and digital agency)
 
 Window A, signed in. Leave about 15 seconds between uploads (free AI tier).
 
 | # | Steps | Expected | Result |
 |---|---|---|---|
 | E1 | Open **Demo scenarios** from the header. | 12 numbered scenarios, each with a project or milestone link, a download link and the expected result. | |
-| E2 | Cafe → Service counter carpentry: upload `cafe-counter-wrong-payee.png`. | **HOLD**: the invoice is from QuickFix Handyman, not Ong Carpentry. | |
-| E3 | Cafe → Shopfront signage: upload `cafe-signage-vague.png`. | **HOLD**: "misc. works" doesn't evidence the signage work. | |
-| E4 | Cafe → Deep clean and handover: upload `cafe-cleaning-lowball.png`. | **HOLD**, with a red fraud check: total far below the milestone amount. | |
-| E5 | Cafe → Electrical rewiring and lighting: upload `cafe-electrical-ok.png` and approve. | **RELEASE**, and a payout is sent. | |
-| E6 | Cafe project page. | The grid shows 3 on hold, 1 paid, and fraud-check counts. | |
-| E7 | Bathroom → Waterproofing: upload `bath-waterproofing-ok.png` and approve. Then Wall and floor tiling: upload `bath-tiling-ok.png` and approve. | Both paid. Remaining is 400.00. | |
-| E8 | Bathroom → Sanitary fittings: upload `bath-fittings-ok.png` (RELEASE), then click approve. | "Release refused: the project fund does not have enough left for this payment." No payout is sent. | |
-| E9 | Bathroom project page: ask the buyer agent with its default request (grout). | A recommendation within 400 SGD, or "No supplier fits". Never a pick over the budget. | |
-| E10 | Cafe project page: ask the buyer agent with its default request (pendant lights). | Three supplier quotes and a recommendation. | |
+| E2 | Product launch event → Event photography: upload `event-photo-wrong-payee.png`. | **HOLD**: the invoice is from SnapQuick Photo Booths, not Aperture Studio. | |
+| E3 | Product launch event → Stage backdrop and printing: upload `event-backdrop-vague.png`. | **HOLD**: "misc. works" doesn't evidence the backdrop work. | |
+| E4 | Product launch event → Catering for 150 guests: upload `event-catering-deposit.png`. | **HOLD**, with a red fraud check: total far below the milestone amount. | |
+| E5 | Product launch event → AV and sound setup: upload `event-av-ok.png` and approve. | **RELEASE**, and a payout is sent. | |
+| E6 | Product launch event project page. | The grid shows 3 on hold, 1 paid, and fraud-check counts. | |
+| E7 | Website rebuild → Design mockups: upload `web-design-ok.png` and approve. Then Front-end build: upload `web-build-ok.png` and approve. | Both paid. Remaining is 400.00. | |
+| E8 | Website rebuild → Launch and SEO setup: upload `web-launch-ok.png` (RELEASE), then click approve. | "Release refused: the project fund does not have enough left for this payment." No payout is sent. | |
+| E9 | Website rebuild project page: ask the buyer agent with its default request (2 monitors). | A recommendation within 400 SGD, or "No supplier fits". Never a pick over the budget. | |
+| E10 | Product launch event project page: ask the buyer agent with its default request (150 folding chairs). | Three supplier quotes and a recommendation. | |
 ## F. Reset and sign-out
 
 | # | Steps | Expected | Result |

@@ -18,8 +18,9 @@ const FALLBACK: { keywords: string[]; title: string; sgd: number }[] = [
   { keywords: ["paint"], title: "Interior emulsion paint 5 L", sgd: 58 },
   { keywords: ["cement", "mortar"], title: "Portland cement 40 kg bag", sgd: 11 },
   { keywords: ["cabinet"], title: "Kitchen base cabinet 60 cm", sgd: 220 },
-  { keywords: ["tarp", "tarpaulin"], title: "Heavy-duty tarpaulin 4x6 m", sgd: 25 },
-  { keywords: ["filter", "water"], title: "Gravity water filter 10 L", sgd: 45 },
+  { keywords: ["chair"], title: "Folding event chair, steel frame", sgd: 15 },
+  { keywords: ["monitor", "screen"], title: "24-inch USB-C monitor", sgd: 210 },
+  { keywords: ["banner", "roll-up"], title: "Roll-up banner stand 85x200 cm", sgd: 65 },
 ];
 
 export function fallbackProducts(query: string): CatalogProduct[] {

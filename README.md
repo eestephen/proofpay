@@ -2,7 +2,7 @@
 
 **AI agents that buy and pay, but only for verified work.**
 
-Small project businesses (renovation, fit-out, maintenance) lose money in the same two places. They pay contractors on trust, and
+Small businesses that deliver work through other people (builders, event companies, digital agencies) lose money in the same two places. They pay contractors on trust, and
 they accept padded or fake invoices. Buying materials also means phoning suppliers for quotes.
 ProofPay puts AI agents on both jobs and lets money move only against proof:
 
@@ -37,9 +37,9 @@ There are three projects:
 
 | Project | Budget | What it demos |
 |---|---|---|
-| Kitchen renovation, 14 Elm St | 8,000 | The happy path, prompt injection, inflated and reused invoices, owner override |
-| Cafe fit-out, 22 Tiong Bahru Rd | 12,000 | Wrong payee, vague invoice, deposit instead of completion invoice, and a clean one for contrast |
-| Bathroom remodel, 8 Jalan Kayu | 3,000 | The budget runs out: the third payout is refused before PayPal is called |
+| Kitchen renovation, 14 Elm St (builder) | 8,000 | The happy path, prompt injection, inflated and reused invoices, owner override |
+| Product launch event, Marina Bay (events company) | 12,000 | Freelancers and vendors: wrong payee, vague invoice, deposit instead of a completion invoice, and a clean one for contrast |
+| Website rebuild, Lim's Bakery (digital agency) | 3,000 | Freelance designer and developers; the budget runs out, so the third payout is refused before PayPal is called |
 
 | # | Scenario | Upload | Expected |
 |---|---|---|---|
@@ -48,13 +48,13 @@ There are three projects:
 | 3 | Inflated invoice (kitchen, Stage 1) | `invoice-inflated.png` | HOLD: total above the milestone |
 | 4 | Reused invoice (kitchen, Stage 4) | `invoice-ok.png` | HOLD: already used on Stage 2 |
 | 5 | Owner override | (a held milestone) | Paid only after ticking a confirmation; logged |
-| 6 | Wrong payee (cafe, counter) | `cafe-counter-wrong-payee.png` | HOLD: invoice from a different company |
-| 7 | Vague invoice (cafe, signage) | `cafe-signage-vague.png` | HOLD: line items don't evidence the work |
-| 8 | Deposit, not completion (cafe, cleaning) | `cafe-cleaning-lowball.png` | HOLD: total far below the milestone |
-| 9 | Clean invoice (cafe, electrical) | `cafe-electrical-ok.png` | RELEASE and payout |
-| 10 | Budget runs out (bathroom) | `bath-waterproofing-ok.png`, `bath-tiling-ok.png`, `bath-fittings-ok.png` | First two paid; the third is refused |
+| 6 | Wrong payee (event, photography) | `event-photo-wrong-payee.png` | HOLD: invoice from a different company |
+| 7 | Vague invoice (event, backdrop) | `event-backdrop-vague.png` | HOLD: line items don't evidence the work |
+| 8 | Deposit, not completion (event, catering) | `event-catering-deposit.png` | HOLD: total far below the milestone |
+| 9 | Clean invoice (event, AV) | `event-av-ok.png` | RELEASE and payout |
+| 10 | Budget runs out (website) | `web-design-ok.png`, `web-build-ok.png`, `web-launch-ok.png` | First two paid; the third is refused |
 | 11 | Buyer agent (any project) | none | Channel3 price reference, three suppliers negotiated, supplier paid, PayPal invoice marked paid, tracking |
-| 12 | Nothing fits (bathroom, tiny budget) | none | "No supplier fits", with no Approve button |
+| 12 | Nothing fits (website, tiny budget) | none | "No supplier fits", with no Approve button |
 
 AI steps take 10 to 30 seconds. The demo uses Gemini's free tier, so if several uploads go quickly
 you may see "wait about a minute". Click **Reset demo** to start over.

@@ -20,7 +20,7 @@ export type Supplier = {
 export const SUPPLIERS: Supplier[] = [
   {
     id: "lion-city",
-    name: "Lion City Building Supplies",
+    name: "Lion City Trade Supplies",
     openFactor: 1.25,
     floorFactor: 0.97,
     stepFactor: 0.08,
@@ -29,7 +29,7 @@ export const SUPPLIERS: Supplier[] = [
   },
   {
     id: "jurong",
-    name: "Jurong Tile & Trade Depot",
+    name: "Jurong Wholesale Depot",
     openFactor: 1.1,
     floorFactor: 0.9,
     stepFactor: 0.05,

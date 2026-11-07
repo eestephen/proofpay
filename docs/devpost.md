@@ -6,7 +6,7 @@ AI agents that buy and pay, but only for verified work.
 
 ## Inspiration
 
-Small renovation firms pay subcontractors deposits and stage payments on trust. Some disappear,
+Small businesses that deliver work through others pay on trust: a builder pays subcontractors, an event company pays photographers and caterers, a digital agency pays freelance designers and developers. Some disappear,
 some invoices are padded, and buying materials means an afternoon of phone calls. The subcontractors who do the work honestly wait weeks to be paid. AI can
 read an invoice, and it can negotiate. We wanted to see whether it could do both without anyone
 having to trust it with the money.
@@ -40,8 +40,8 @@ The demo has three projects and 12 guided scenarios (an in-app **Demo scenarios*
 downloadable test invoices):
 
 - a kitchen renovation (the happy path, prompt injection, inflated and reused invoices, owner override);
-- a cafe fit-out (wrong payee, vague invoice, deposit instead of completion, clean invoice);
-- a bathroom remodel whose budget runs out, so the third payout is refused before PayPal is called.
+- an events company's product launch (wrong payee, vague invoice, deposit instead of completion, clean invoice);
+- a digital agency's website rebuild whose budget runs out, so the third freelancer payout is refused before PayPal is called.
 ## How we built it
 
 - **Next.js 16** (App Router, Server Actions) and TypeScript in one codebase, deployed on

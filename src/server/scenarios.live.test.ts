@@ -18,20 +18,20 @@ const service = createService({
   secret: "live",
 });
 const owner = service.ownerSession("live")!;
-const [, cafe, bath] = service.listProjects();
-const c = service.getProject(cafe.id)!.milestones;
-const b = service.getProject(bath.id)!.milestones;
+const [, event, web] = service.listProjects();
+const e = service.getProject(event.id)!.milestones;
+const w = service.getProject(web.id)!.milestones;
 const img = (n: string) => ({ data: new Uint8Array(readFileSync(`demo/${n}`)), mediaType: "image/png" });
 const pause = () => new Promise((r) => setTimeout(r, 13_000)); // free tier: 5 requests/min
 
 const cases: [string, number, string, "ready" | "on_hold"][] = [
-  ["cafe electrical, clean", c[0].id, "cafe-electrical-ok.png", "ready"],
-  ["cafe counter, wrong payee", c[1].id, "cafe-counter-wrong-payee.png", "on_hold"],
-  ["cafe signage, vague line items", c[2].id, "cafe-signage-vague.png", "on_hold"],
-  ["cafe cleaning, deposit far below", c[3].id, "cafe-cleaning-lowball.png", "on_hold"],
-  ["bath waterproofing, clean", b[0].id, "bath-waterproofing-ok.png", "ready"],
-  ["bath tiling, clean", b[1].id, "bath-tiling-ok.png", "ready"],
-  ["bath fittings, clean", b[2].id, "bath-fittings-ok.png", "ready"],
+  ["event AV, clean", e[0].id, "event-av-ok.png", "ready"],
+  ["event photography, wrong payee", e[1].id, "event-photo-wrong-payee.png", "on_hold"],
+  ["event backdrop, vague line items", e[2].id, "event-backdrop-vague.png", "on_hold"],
+  ["event catering, deposit far below", e[3].id, "event-catering-deposit.png", "on_hold"],
+  ["website design, clean", w[0].id, "web-design-ok.png", "ready"],
+  ["website build, clean", w[1].id, "web-build-ok.png", "ready"],
+  ["website launch, clean", w[2].id, "web-launch-ok.png", "ready"],
 ];
 
 describe("live: demo scenarios", () => {
