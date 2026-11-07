@@ -244,3 +244,33 @@ export function negotiateByRules(
     .sort((a, b) => a.totalMinor - b.totalMinor)[0];
   return { supplierId: best?.supplierId ?? null, quotes };
 }
+
+/**
+ * Rule-based reading of a purchase request, used when the AI is unavailable. Handles the
+ * shape the demo uses: "Buy 40 m2 of floor tiles, max 2,000 SGD, delivered within 5 days".
+ */
+export function parseRequestByRules(text: string): {
+  item: string;
+  quantity: number;
+  unit: string;
+  budgetMinor: number;
+  deadlineDays: number;
+  searchQuery: string;
+} {
+  const t = text.replace(/\s+/g, " ").trim();
+  const qty =
+    /\b(\d+)\s*(m2|m²|sqm|bags?|pcs|pieces|units?|sets?|boxes?|rolls?|litres?|l)?\s+(?:of\s+)?([a-z][a-z0-9 \-]*?)(?=,| for | max| within| by |$)/i.exec(
+      t.replace(/^(please\s+)?(buy|order|get|purchase)\s+/i, ""),
+    );
+  const budget = /(?:max|budget|up to|under)\s*(?:S?\$|SGD)?\s*([\d,]+(?:\.\d{1,2})?)/i.exec(t);
+  const days = /(?:within|in)\s+(\d+)\s*days?/i.exec(t);
+  const item = qty?.[3]?.trim() ?? "";
+  return {
+    item,
+    quantity: qty ? Number(qty[1]) : 0,
+    unit: qty?.[2]?.toLowerCase() ?? "units",
+    budgetMinor: budget ? Math.round(Number(budget[1].replace(/,/g, "")) * 100) : 0,
+    deadlineDays: days ? Number(days[1]) : 0,
+    searchQuery: item,
+  };
+}

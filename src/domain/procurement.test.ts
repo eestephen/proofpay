@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { negotiateByRules, SupplierDesk, SUPPLIERS, supplierQuote, type Supplier } from "./procurement";
+import {
+  negotiateByRules,
+  parseRequestByRules,
+  SupplierDesk,
+  SUPPLIERS,
+  supplierQuote,
+  type Supplier,
+} from "./procurement";
 
 const s: Supplier = {
   id: "t",
@@ -91,5 +98,30 @@ describe("negotiateByRules", () => {
       negotiateByRules((id, c) => desk.ask(id, c), desk.suppliers, [], { budgetMinor: 100, deadlineDays: 5 })
         .supplierId,
     ).toBeNull();
+  });
+});
+
+describe("parseRequestByRules", () => {
+  it("reads the demo request shapes", () => {
+    expect(
+      parseRequestByRules("Buy 40 m2 of porcelain floor tiles for the kitchen, max 2,000 SGD, delivered within 5 days"),
+    ).toMatchObject({
+      item: "porcelain floor tiles",
+      quantity: 40,
+      unit: "m2",
+      budgetMinor: 200000,
+      deadlineDays: 5,
+    });
+    expect(
+      parseRequestByRules("Buy 150 folding chairs for the event, max 2,500 SGD, delivered within 4 days"),
+    ).toMatchObject({
+      item: "folding chairs",
+      quantity: 150,
+      budgetMinor: 250000,
+      deadlineDays: 4,
+    });
+  });
+  it("leaves missing fields at 0", () => {
+    expect(parseRequestByRules("buy tiles")).toMatchObject({ quantity: 0, budgetMinor: 0, deadlineDays: 0 });
   });
 });

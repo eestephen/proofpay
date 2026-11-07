@@ -1,7 +1,7 @@
 import { generateText, hasToolCall, isStepCount, Output, tool } from "ai";
 import { google } from "@ai-sdk/google";
 import { z } from "zod";
-import { MAX_ROUNDS, negotiateByRules, type Quote } from "@/domain/procurement";
+import { MAX_ROUNDS, negotiateByRules, parseRequestByRules, type Quote } from "@/domain/procurement";
 import type { NegotiatorPort, PurchaseRequest } from "./ports";
 
 /**
@@ -51,17 +51,24 @@ type Result = Awaited<ReturnType<NegotiatorPort["negotiate"]>>;
 
 export const geminiNegotiator: NegotiatorPort = {
   async parseRequest(text, { today, currency }): Promise<PurchaseRequest> {
-    const out = await withFallback(async (model) => {
-      const { output } = await generateText({
-        model: google(model),
-        maxRetries: 0,
-        abortSignal: AbortSignal.timeout(30_000),
-        output: Output.object({ schema: requestSchema }),
-        system: `You turn a purchase request into structured fields. Today is ${today}. Amounts are in ${currency}. Never invent values that are not stated: use 0.`,
-        prompt: text,
+    let out: z.infer<typeof requestSchema>;
+    try {
+      out = await withFallback(async (model) => {
+        const { output } = await generateText({
+          model: google(model),
+          maxRetries: 0,
+          abortSignal: AbortSignal.timeout(30_000),
+          output: Output.object({ schema: requestSchema }),
+          system: `You turn a purchase request into structured fields. Today is ${today}. Amounts are in ${currency}. Never invent values that are not stated: use 0.`,
+          prompt: text,
+        });
+        return output;
       });
-      return output;
-    });
+    } catch {
+      // AI unavailable (rate limit or outage): read the request with fixed rules instead.
+      const r = parseRequestByRules(text);
+      return r;
+    }
     return {
       item: out.item,
       quantity: out.quantity,
@@ -73,23 +80,30 @@ export const geminiNegotiator: NegotiatorPort = {
   },
 
   async chooseReference(request, products) {
-    const out = await withFallback(async (model) => {
-      const { output } = await generateText({
-        model: google(model),
-        maxRetries: 0,
-        abortSignal: AbortSignal.timeout(30_000),
-        output: Output.object({ schema: referenceSchema }),
-        system:
-          "Pick the catalog listing that best matches the requested item and work out its price for ONE requested unit. " +
-          "If a listing is a pack or bundle, divide by how many units it contains. Prices are already in the project currency. " +
-          "The unit price can never exceed the listing price.",
-        prompt: JSON.stringify({
-          request: { item: request.item, quantity: request.quantity, unit: request.unit },
-          listings: products.map((p) => ({ productId: p.id, title: p.title, price: p.priceMinor / 100 })),
-        }),
+    let out: z.infer<typeof referenceSchema>;
+    try {
+      out = await withFallback(async (model) => {
+        const { output } = await generateText({
+          model: google(model),
+          maxRetries: 0,
+          abortSignal: AbortSignal.timeout(30_000),
+          output: Output.object({ schema: referenceSchema }),
+          system:
+            "Pick the catalog listing that best matches the requested item and work out its price for ONE requested unit. " +
+            "If a listing is a pack or bundle, divide by how many units it contains. Prices are already in the project currency. " +
+            "The unit price can never exceed the listing price.",
+          prompt: JSON.stringify({
+            request: { item: request.item, quantity: request.quantity, unit: request.unit },
+            listings: products.map((p) => ({ productId: p.id, title: p.title, price: p.priceMinor / 100 })),
+          }),
+        });
+        return output;
       });
-      return output;
-    });
+    } catch {
+      // AI unavailable: take the first listing at its own price as the reference.
+      const cheapest = [...products].sort((a, b) => a.priceMinor - b.priceMinor)[0];
+      return { productId: cheapest.id, unitPriceMinor: cheapest.priceMinor, reason: "Cheapest catalog match (AI unavailable)" };
+    }
     return { productId: out.productId, unitPriceMinor: Math.round(out.unitPrice * 100), reason: out.reason };
   },
 
@@ -120,6 +134,7 @@ export const geminiNegotiator: NegotiatorPort = {
         if (asked.length > 0) break;
       }
     }
+    const aiQuotes = asked.length;
     const byRules = negotiateByRules(recording.requestQuote, tools.suppliers, [...asked], {
       budgetMinor: request.budgetMinor,
       deadlineDays: request.deadlineDays,
@@ -129,7 +144,7 @@ export const geminiNegotiator: NegotiatorPort = {
       recommendedSupplierId: byRules.supplierId,
       reasoning:
         `Finished by ProofPay's fixed negotiation rules because ${why}` +
-        (asked.length > 0 ? ` after ${asked.length} AI-led quote${asked.length === 1 ? "" : "s"}` : "") +
+        (aiQuotes > 0 ? ` after ${aiQuotes} AI-led quote${aiQuotes === 1 ? "" : "s"}` : "") +
         ": counter each supplier that can deliver in time at 15% below its last price, then pick the cheapest offer " +
         "that fits budget, deadline and stock.",
       model: "rules (AI unavailable)",
