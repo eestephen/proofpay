@@ -199,26 +199,40 @@ if (await approve.count()) {
 await s;
 await pause(1500);
 
-// 8. NGO mode and donor page
-await page.goto(`${base}/milestones/5`);
-await page.setInputFiles('input[name="proof"]', `${demo}\\invoice-ngo-cleanup.png`);
-await page.getByRole("button", { name: /Submit proof/ }).click();
-await cut("AI verifying (NGO)", async () => {
+// 8. More scenarios: wrong payee (cafe) and fund limit (bathroom). Prep off camera.
+await cut("preparing scenarios", async () => {
+  const pay = async (id, file) => {
+    await page.goto(`${base}/milestones/${id}`);
+    await page.setInputFiles('input[name="proof"]', `${demo}\\${file}`);
+    await page.getByRole("button", { name: /Submit proof/ }).click();
+    await page.getByRole("button", { name: /approve and release/ }).waitFor({ timeout: 180_000 });
+    await page.getByRole("button", { name: /approve and release/ }).click();
+    await page.getByText(/PayPal payout batch/).waitFor({ timeout: 60_000 });
+    await page.waitForTimeout(13_000);
+  };
+  await pay(9, "bath-waterproofing-ok.png");
+  await pay(10, "bath-tiling-ok.png");
+  await page.goto(`${base}/milestones/11`);
+  await page.setInputFiles('input[name="proof"]', `${demo}\\bath-fittings-ok.png`);
+  await page.getByRole("button", { name: /Submit proof/ }).click();
   await page.getByRole("button", { name: /approve and release/ }).waitFor({ timeout: 180_000 });
-  await page.getByRole("button", { name: /approve and release/ }).click();
-  await page.getByText(/PayPal payout batch/).waitFor({ timeout: 60_000 });
+  await page.waitForTimeout(13_000);
+  await page.goto(`${base}/milestones/6`);
+  await page.setInputFiles('input[name="proof"]', `${demo}\\cafe-counter-wrong-payee.png`);
+  await page.getByRole("button", { name: /Submit proof/ }).click();
+  await page.getByText(/AI verifier recommends/).waitFor({ timeout: 180_000 });
 });
-const donor = await ctx.browser().newContext({ viewport: { width: 1280, height: 800 } });
-await page.goto(`${base}/?mode=ngo`);
 s = say(8);
-await pause(2000);
-await page.getByRole("link", { name: /Public donor impact page/ }).first().click();
-await page.getByText("Where your donation went").waitFor();
+await highlight(page.locator('img[alt="Submitted invoice"]'));
+await pause(1800);
+await highlight(page.getByText(/AI verifier recommends/).locator(".."));
 await pause(2500);
-await highlight(page.locator("main ul li").first());
+await page.goto(`${base}/milestones/11`);
+await page.getByRole("button", { name: /approve and release/ }).click();
+await page.getByText(/Release refused/).waitFor({ timeout: 30_000 });
+await highlight(page.getByText(/Release refused/));
 await s;
-await donor.close();
-
+await pause(1200);
 // 9. Closing card
 await card("ProofPay", "PayPal Payouts · Invoicing · Webhooks · Gemini · Channel3 · AG Grid · Render<br><br>proofpay-988i.onrender.com · github.com/eestephen/proofpay");
 caption = "";
