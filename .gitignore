@@ -50,3 +50,8 @@ next-env.d.ts
 /demo/t08-*.png
 /demo/t09-*.png
 /demo-video/
+
+/deck/*.png
+/deck/*.mp4
+/deck/*.pptx
+/deck/build.json
