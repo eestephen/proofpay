@@ -35,17 +35,19 @@ function slidePart(png, clip, name, lead = 0.4, tail = 0.8) {
 
 const S = (n) => `${base}\\slides\\s${n}.png`;
 const [s1, s2, s3] = N.intro;
-slidePart(S(1), s1, "p1");
-slidePart(S(3), s2, "p2", 0.4, 1.2);
-slidePart(S(4), s3, "p3", 0.4, 0.6);
+slidePart(S(1), s1, "p1", 0.4, 0.5);
+slidePart(S(3), s2, "p2", 0.3, 0.6);
+slidePart(S(4), s3, "p3", 0.4, 0.4);
 
 // Demo: from just before narration 1 to the start of the old closing card (narration 9).
 // First frame of the real app in this recording (the site was slow to load, so the title card ran long).
 const appStart = Number(process.env.APP_START ?? at[1]);
-const segStart = appStart, segEnd = at[9];
+const n8 = N.demo.find((d) => d.i === 8);
+const segStart = appStart, segEnd = Math.min(at[9], at[8] + n8.duration + 0.6);
 // Hold the first board frame so narration 1 fits before narration 2.
 const n1 = N.demo.find((d) => d.i === 1);
-const hold = Math.max(0, n1.duration + 0.5 - (at[2] - appStart));
+const N1_TEMPO = 1.1; // opening demo line plays over a frozen frame; slightly faster keeps the total under 3:00
+const hold = Math.max(0, n1.duration / N1_TEMPO + 0.4 - (at[2] - appStart));
 const segLen = segEnd - segStart + hold;
 const demo = N.demo.sort((a, b) => a.i - b.i);
 const inputs = ["-ss", segStart.toFixed(3), "-t", (segEnd - segStart).toFixed(3), "-i", `${base}\\proofpay-demo.mp4`];
@@ -54,7 +56,7 @@ demo.forEach((d, k) => {
   inputs.push("-i", d.file);
   const start = d.i === 1 ? 0 : at[d.i] - segStart + hold;
   const room = (k + 1 < demo.length ? at[demo[k + 1].i] - segStart + hold : segLen) - start - 0.2;
-  const tempo = d.duration > room ? Math.min(1.15, d.duration / room) : 1;
+  const tempo = d.i === 1 ? N1_TEMPO : d.duration > room ? Math.min(1.15, d.duration / room) : 1;
   const ms = Math.round(start * 1000);
   filters.push(`[${k + 1}:a]aresample=48000,atempo=${tempo.toFixed(3)},adelay=${ms}|${ms}[a${k}]`);
   srt.push([clock + start, clock + start + d.duration / tempo, d.text]);
@@ -65,9 +67,27 @@ ff([...inputs, "-filter_complex", filters.join(";"), "-map", "[v]", "-map", "[a]
 parts.push(demoOut);
 clock += segLen;
 
+// Ledger: AG Grid + AG Charts across all projects, recorded separately with real data.
+{
+  const L = JSON.parse(readFileSync(`${base}\\ledger-raw.json`, "utf8"));
+  const clip = N.ledger;
+  const from = L.ready + 0.4; // after AG Grid's row animation settles
+  const d = Math.min(L.end - from, clip.duration + 0.9);
+  const out = `${tmp}\\p4b-ledger.mp4`;
+  ff([
+    "-ss", from.toFixed(2), "-t", d.toFixed(2), "-i", `${base}\\ledger-raw.webm`, "-i", clip.file,
+    "-filter_complex",
+    `[0:v]scale=1152:720,pad=1280:720:64:0:color=${NAVY},fps=30,fade=t=in:st=0:d=0.3,fade=t=out:st=${(d - 0.3).toFixed(2)}:d=0.3[v];[1:a]aresample=48000,adelay=300|300,apad,atrim=0:${d.toFixed(2)}[a]`,
+    "-map", "[v]", "-map", "[a]", ...enc, "-t", d.toFixed(2), out,
+  ]);
+  srt.push([clock + 0.3, clock + 0.3 + clip.duration, clip.text]);
+  clock += d;
+  parts.push(out);
+}
+
 const [o1, o2] = N.outro;
-slidePart(S(13), o1, "p5", 0.4, 1.4);
-slidePart(S(14), o2, "p6", 0.4, 1.4);
+slidePart(S(13), o1, "p5", 0.3, 0.7);
+slidePart(S(14), o2, "p6", 0.3, 1.0);
 
 writeFileSync(`${tmp}\\list.txt`, parts.map((p) => `file '${p.replace(/\\/g, "/")}'`).join("\n"));
 const final = `${base}\\proofpay-pitch-demo.mp4`;

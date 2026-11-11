@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Ledger** page (owner only): totals across projects, an AG Charts budget chart, an AG Grid of every payment and supplier order with a pinned total that follows the filter, and an AG Grid of the audit trail across projects.
+- `GET /api/health` for uptime pings; it touches no AI, PayPal or database.
+- Sourced statistics and an estimated benefit vs cost in the README, the Devpost text and the deck.
+- Deck has 15 slides, including Why it matters, Ledger and Estimated benefit vs cost. Pitch video (2:58) includes a Ledger shot.
+
 ## 0.2.0 (2026-11-07)
 
 - Removed NGO mode and the donor impact page from the hackathon build (kept in git tag `with-ngo`).

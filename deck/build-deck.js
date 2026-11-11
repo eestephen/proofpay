@@ -164,6 +164,25 @@ shape(s, { preset: "roundRect", text: "Owner approves → PayPal Payout to the s
 footer(s);
 notes(s, "This is the agentic commerce part. If Gemini hits a rate limit mid-negotiation, fixed rules finish the remaining rounds so the request always completes, and the page says so.");
 
+// 8b. Ledger (AG Grid + AG Charts)
+s = slide();
+title(s, "Ledger: every payment, one view");
+shape(s, { preset: "rect", x: cm(1.5), y: cm(3.7), width: cm(21.9), height: cm(13.85), fill: LIGHT, line: "none" });
+pic(s, { src: D + "ledger-crop.png", x: cm(1.65), y: cm(3.85), width: cm(21.6), height: cm(13.48), alt: "Ledger page: totals across three projects, a stacked budget chart and a grid of every payment with a pinned total" });
+const ledgerFacts = [
+  ["Totals across projects", "Budget, released, committed and remaining"],
+  ["Budget chart", "AG Charts: released, in flight and left, per project"],
+  ["Payments grid", "AG Grid: filter any column; the pinned total follows the filter"],
+  ["Audit trail grid", "Every proof, AI check, rule hit, approval and webhook, paged"],
+];
+ledgerFacts.forEach(([h, b], i) => {
+  const y = 3.7 + i * 3.4;
+  shape(s, { text: h, x: cm(24.2), y: cm(y), width: cm(8.4), height: cm(1.1), font: H, size: 17, bold: true, color: NAVY, fill: "none", line: "none" });
+  shape(s, { text: b, x: cm(24.2), y: cm(y + 1.1), width: cm(8.4), height: cm(2.1), font: B, size: 15, color: INK, fill: "none", line: "none" });
+});
+footer(s);
+notes(s, "The owner's view across all projects, built on AG Grid Community and AG Charts Community. Filter the payments grid and the pinned total row changes to match; click a row to open the milestone. The audit trail grid shows every event in every project, newest first.");
+
 // 9. Architecture
 s = slide();
 title(s, "Architecture");
