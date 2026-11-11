@@ -1,6 +1,7 @@
 // Slides + live demo + slides, with neural narration. Writes demo-video/proofpay-pitch-demo.mp4 + .srt
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { chromium } from "playwright-core";
 
 const base = "C:\\dev\\ProofPay\\demo-video";
 const tmp = `${base}\\parts`;
@@ -19,25 +20,64 @@ const parts = [];
 const srt = [];
 let clock = 0;
 
-function slidePart(png, clip, name, lead = 0.4, tail = 0.8) {
+// On-screen captions in the same box as the demo recording (record-demo.mjs): drawn at 1280x800, shown at 1152x720.
+const browser = await chromium.launch({ executablePath: "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", headless: true });
+const capPage = await (await browser.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
+let capN = 0;
+async function captionPng(text, bottom = 24) {
+  await capPage.setContent(`<html><body style="margin:0;background:transparent"><div style="position:fixed;left:50%;bottom:${bottom}px;transform:translateX(-50%);max-width:1100px;background:rgba(17,24,39,.92);color:#fff;font:600 20px/1.35 system-ui,sans-serif;padding:12px 20px;border-radius:10px;text-align:center;box-shadow:0 6px 24px rgba(0,0,0,.25)">${text}</div></body></html>`);
+  const file = `${tmp}\\cap${++capN}.png`;
+  await capPage.screenshot({ path: file, omitBackground: true });
+  return file;
+}
+// Split long narration into sentence groups of up to ~120 characters, timed by length.
+function chunks(text, duration, max = 120) {
+  const sentences = (text.match(/[^.!?]+[.!?]+(\s|$)/g)?.map((s) => s.trim()) ?? [text])
+    // Sentences longer than one caption are split after commas.
+    .flatMap((s) => (s.length <= max ? [s] : s.split(/(?<=,)\s+/)));
+  const groups = [];
+  for (const s of sentences) {
+    const last = groups.at(-1);
+    if (last && last.length + s.length + 1 <= max) groups[groups.length - 1] = `${last} ${s}`;
+    else groups.push(s);
+  }
+  const total = groups.reduce((n, g) => n + g.length, 0);
+  let t = 0;
+  return groups.map((g) => {
+    const len = (duration * g.length) / total;
+    const c = { text: g, start: t, end: t + len };
+    t += len;
+    return c;
+  });
+}
+
+async function slidePart(png, clip, name, lead = 0.4, tail = 0.8, cap = {}) {
   const d = lead + clip.duration + tail;
   const out = `${tmp}\\${name}.mp4`;
+  const caps = chunks(clip.text, clip.duration, cap.max);
+  const inputs = ["-loop", "1", "-t", d.toFixed(2), "-i", png, "-i", clip.file];
+  let chain = "[0:v]scale=1280:720[b0]";
+  for (const [k, cp] of caps.entries()) {
+    inputs.push("-loop", "1", "-t", d.toFixed(2), "-i", await captionPng(cp.text, cap.bottom));
+    const a = (lead + cp.start).toFixed(2), b = (lead + cp.end).toFixed(2);
+    chain += `;[${k + 2}:v]scale=1152:720[c${k}];[b${k}][c${k}]overlay=64:0:enable='between(t,${a},${b})'[b${k + 1}]`;
+    srt.push([clock + lead + cp.start, clock + lead + cp.end, cp.text]);
+  }
   ff([
-    "-loop", "1", "-t", d.toFixed(2), "-i", png, "-i", clip.file,
+    ...inputs,
     "-filter_complex",
-    `[0:v]scale=1280:720,fade=t=in:st=0:d=0.3,fade=t=out:st=${(d - 0.3).toFixed(2)}:d=0.3[v];[1:a]adelay=${Math.round(lead * 1000)}|${Math.round(lead * 1000)},apad,atrim=0:${d.toFixed(2)}[a]`,
+    `${chain};[b${caps.length}]fade=t=in:st=0:d=0.3,fade=t=out:st=${(d - 0.3).toFixed(2)}:d=0.3[v];[1:a]adelay=${Math.round(lead * 1000)}|${Math.round(lead * 1000)},apad,atrim=0:${d.toFixed(2)}[a]`,
     "-map", "[v]", "-map", "[a]", ...enc, "-t", d.toFixed(2), out,
   ]);
-  srt.push([clock + lead, clock + lead + clip.duration, clip.text]);
   clock += d;
   parts.push(out);
 }
 
 const S = (n) => `${base}\\slides\\s${n}.png`;
 const [s1, s2, s3] = N.intro;
-slidePart(S(1), s1, "p1", 0.4, 0.5);
-slidePart(S(3), s2, "p2", 0.3, 0.6);
-slidePart(S(4), s3, "p3", 0.4, 0.4);
+await slidePart(S(1), s1, "p1", 0.4, 0.5);
+await slidePart(S(3), s2, "p2", 0.3, 0.6);
+await slidePart(S(4), s3, "p3", 0.4, 0.4);
 
 // Demo: from just before narration 1 to the start of the old closing card (narration 9).
 // First frame of the real app in this recording (the site was slow to load, so the title card ran long).
@@ -88,9 +128,11 @@ clock += segLen;
 }
 
 const [o1, o2] = N.outro;
-slidePart(S(13), o1, "p5", 0.3, 0.7);
-slidePart(S(14), o2, "p6", 0.3, 1.0);
+// One-line captions, set low, so they cover only the footnote and not the return line.
+await slidePart(S(13), o1, "p5", 0.3, 0.7, { max: 80, bottom: 6 });
+await slidePart(S(14), o2, "p6", 0.3, 1.0);
 
+await browser.close();
 writeFileSync(`${tmp}\\list.txt`, parts.map((p) => `file '${p.replace(/\\/g, "/")}'`).join("\n"));
 const final = `${base}\\proofpay-pitch-demo.mp4`;
 ff(["-f", "concat", "-safe", "0", "-i", `${tmp}\\list.txt`, "-c", "copy", "-movflags", "+faststart", final]);
