@@ -44,6 +44,27 @@ shape(s, { text: "Builders paying subcontractors · event companies paying vendo
 footer(s);
 notes(s, "Any business that delivers work through other people has this problem. The honest contractors suffer too: approval is slow, so they wait weeks to be paid.");
 
+// 2b. Why it matters (sourced)
+s = slide();
+title(s, "Why it matters");
+const kpis = [
+  ["5%", "of revenue lost to fraud each year", "ACFE, Report to the Nations 2026"],
+  ["12 mo", "a typical fraud runs before it is detected", "ACFE, Report to the Nations 2026"],
+  ["US$55.5B", "lost to business email compromise, 2013–2023", "FBI IC3, Sept 2024"],
+  ["4 in 5", "Singapore firms report delayed B2B payments", "Atradius, Singapore 2026"],
+];
+const kw = (30.87 - 3 * 0.76) / 4;
+kpis.forEach(([big, sub, src], i) => {
+  const x = 1.5 + i * (kw + 0.76);
+  const hot = i === 3;
+  shape(s, { preset: "roundRect", x: cm(x), y: cm(3.9), width: cm(kw), height: cm(9.4), fill: hot ? AMBER : NAVY, line: "none" });
+  shape(s, { text: big, x: cm(x), y: cm(4.6), width: cm(kw), height: cm(2.8), font: H, size: big.length > 6 ? 40 : 54, bold: true, color: hot ? NAVY : WHITE, fill: "none", line: "none", align: "center", valign: "middle" });
+  shape(s, { text: sub, x: cm(x + 0.5), y: cm(7.8), width: cm(kw - 1), height: cm(3.4), font: B, size: 18, color: hot ? NAVY : WHITE, fill: "none", line: "none", align: "center" });
+  shape(s, { text: src, x: cm(x + 0.5), y: cm(11.6), width: cm(kw - 1), height: cm(1.4), font: B, size: 12, italic: true, color: hot ? NAVY : "B8C7D9", fill: "none", line: "none", align: "center" });
+});
+shape(s, { text: "Construction is among the hardest hit, and Atradius finds Singapore delays come mostly from approval cycles and invoicing issues: the step ProofPay automates.", x: cm(1.5), y: cm(14), width: cm(30.87), height: cm(2.2), font: B, size: 18, color: INK, fill: "none", line: "none" });
+shape(s, { text: "Sources: acfe.com (Occupational Fraud 2026 press release) · ic3.gov/PSA/2024/PSA240911 · atradius.sg (B2B payment practices trends in Singapore 2026)", x: cm(1.5), y: cm(17.2), width: cm(30.87), height: cm(1), font: B, size: 10, color: MUTED, fill: "none", line: "none" });
+notes(s, "ACFE: CFEs estimate 5% of revenue lost to fraud each year; median loss per case US$104,000; frauds typically run 12 months before detection; smaller businesses have the highest median losses. FBI IC3: US$55.5B exposed BEC losses Oct 2013 to Dec 2023. Atradius Singapore 2026: around four in five companies report delayed B2B payments, construction hardest hit, delays mostly from approval cycles and invoicing.");
 // 3. Flow
 s = slide();
 title(s, "How a payment is released");
@@ -205,6 +226,37 @@ inds.forEach(([h, sub, b], i) => {
 shape(s, { text: "Each has a test invoice and expected result on the site's Demo scenarios page.", x: cm(1.5), y: cm(16.5), width: cm(30.87), height: cm(1), font: B, size: 16, italic: true, color: NAVY, fill: "none", line: "none" });
 notes(s, "Every scenario was run against real Gemini and gave the designed outcome. Judges can reproduce any of them in a few minutes.");
 
+// 11b. Estimated benefit vs cost
+s = slide();
+title(s, "Estimated benefit vs cost");
+shape(s, { text: "Per year, for an illustrative firm paying SGD 600,000 to subcontractors and suppliers in about 100 payments (SGD 200,000 of it materials).", x: cm(1.5), y: cm(3.1), width: cm(30.87), height: cm(1.7), font: B, size: 16, italic: true, color: MUTED, fill: "none", line: "none" });
+const rows2 = [
+  ["Overbilling and duplicates caught", "1% of payouts overbilled, half caught", "3,000"],
+  ["Better materials prices", "3% below first quote on 200,000", "6,000"],
+  ["Admin time saved", "3 h/week × SGD 40/h", "6,240"],
+];
+const costs = [
+  ["PayPal Payouts fees", "100 × SGD 1.60 cap (PayPal SG)", "160"],
+  ["AI checks and negotiations", "US$0.0006 per check, measured", "< 5"],
+  ["Hosting share", "Render Starter US$7/month", "115"],
+  ["ProofPay subscription", "proposed SGD 49/month", "588"],
+];
+const table = (x, head, data, total, fill, tcolor) => {
+  shape(s, { preset: "roundRect", x: cm(x), y: cm(5), width: cm(15), height: cm(9.8), fill: LIGHT, line: "none" });
+  shape(s, { text: head, x: cm(x + 0.6), y: cm(5.3), width: cm(13.8), height: cm(1.2), font: H, size: 20, bold: true, color: NAVY, fill: "none", line: "none" });
+  data.forEach(([a, b, v], i) => {
+    const y = 6.6 + i * 1.6;
+    shape(s, { text: a, x: cm(x + 0.6), y: cm(y), width: cm(10.4), height: cm(0.9), font: B, size: 15, bold: true, color: INK, fill: "none", line: "none" });
+    shape(s, { text: b, x: cm(x + 0.6), y: cm(y + 0.8), width: cm(10.4), height: cm(0.75), font: B, size: 12, color: MUTED, fill: "none", line: "none" });
+    shape(s, { text: v, x: cm(x + 11), y: cm(y), width: cm(3.4), height: cm(0.9), font: B, size: 15, bold: true, color: INK, fill: "none", line: "none", align: "right" });
+  });
+  shape(s, { preset: "roundRect", text: total, x: cm(x + 0.6), y: cm(13.25), width: cm(13.8), height: cm(1.2), fill, line: "none", font: H, size: 18, bold: true, color: tcolor, align: "center", valign: "middle" });
+};
+table(1.5, "Benefit (SGD)", rows2, "≈ SGD 15,000 a year", GREEN, WHITE);
+table(17.37, "Cost (SGD)", costs, "≈ SGD 870 a year", NAVY, WHITE);
+shape(s, { preset: "roundRect", text: "About 18× return. Counting only caught overbilling, still about 3.5×.", x: cm(1.5), y: cm(15.1), width: cm(30.87), height: cm(1.5), fill: "FFF4E0", line: "none", font: B, size: 20, bold: true, color: NAVY, align: "center", valign: "middle" });
+shape(s, { text: "Estimate, not measured customer data. Benefit inputs are assumptions to validate in a pilot; cost inputs are published prices (PayPal SG fees, Gemini 3.1 Flash-Lite, Render) and our measured token use.", x: cm(1.5), y: cm(16.9), width: cm(30.87), height: cm(1.3), font: B, size: 11, color: MUTED, fill: "none", line: "none" });
+notes(s, "Assumptions: SGD 600k payouts in 100 payments; 1% overbilled or duplicated, half caught; 3% lower materials price (the demo negotiated 16% below an opening quote, but suppliers are simulated, so we use a conservative 3%); 3 hours a week of checking and quote-chasing saved at SGD 40/h. Costs: PayPal Singapore domestic Payouts 2% capped at SGD 1.60 each; Gemini 3.1 Flash-Lite paid tier US$0.30 per 1M input and US$2.50 per 1M output tokens, and one invoice check measured at 1,241 tokens; Render Starter US$7/month; ProofPay subscription SGD 49/month is our proposal. Net ~SGD 14,400; ~18x.");
 // 12. Close
 s = slide(NAVY);
 shape(s, { text: "Next steps", x: cm(1.5), y: cm(1), width: cm(30), height: cm(2.2), font: H, size: 36, bold: true, color: WHITE, fill: "none", line: "none" });

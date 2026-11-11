@@ -36,8 +36,8 @@ function slidePart(png, clip, name, lead = 0.4, tail = 0.8) {
 const S = (n) => `${base}\\slides\\s${n}.png`;
 const [s1, s2, s3] = N.intro;
 slidePart(S(1), s1, "p1");
-slidePart(S(2), s2, "p2");
-slidePart(S(3), s3, "p3", 0.4, 0.6);
+slidePart(S(3), s2, "p2", 0.4, 1.2);
+slidePart(S(4), s3, "p3", 0.4, 0.6);
 
 // Demo: from just before narration 1 to the start of the old closing card (narration 9).
 // First frame of the real app in this recording (the site was slow to load, so the title card ran long).
@@ -66,8 +66,8 @@ parts.push(demoOut);
 clock += segLen;
 
 const [o1, o2] = N.outro;
-slidePart(S(10), o1, "p5");
-slidePart(S(12), o2, "p6", 0.4, 1.4);
+slidePart(S(13), o1, "p5", 0.4, 1.4);
+slidePart(S(14), o2, "p6", 0.4, 1.4);
 
 writeFileSync(`${tmp}\\list.txt`, parts.map((p) => `file '${p.replace(/\\/g, "/")}'`).join("\n"));
 const final = `${base}\\proofpay-pitch-demo.mp4`;

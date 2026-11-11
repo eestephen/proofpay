@@ -11,6 +11,32 @@ some invoices are padded, and buying materials means an afternoon of phone calls
 read an invoice, and it can negotiate. We wanted to see whether it could do both without anyone
 having to trust it with the money.
 
+## Why it matters
+
+- **5% of revenue** is lost to fraud each year, by fraud examiners' estimate; the median case costs **US$104,000**, a typical fraud runs **12 months** before it is detected, and smaller businesses have the highest median losses. ([ACFE, Occupational Fraud 2026: A Report to the Nations](https://www.acfe.com/about-the-acfe/newsroom-for-media/press-releases/press-release-detail?s=occupational-fraud-2026-a-report-to-the-nations-pr))
+- **US$55.5 billion** in exposed losses to business email compromise worldwide, October 2013 to December 2023: fake invoices and redirected payments. ([FBI IC3, PSA I-091124](https://www.ic3.gov/PSA/2024/PSA240911))
+- **Around four in five** Singapore companies report delayed B2B payments, with construction among the hardest hit; delays mostly come from internal approval cycles and invoicing issues. ([Atradius, B2B payment practices trends in Singapore 2026](https://atradius.sg/knowledge-and-research/reports/b2b-payment-practices-trends-in-singapore-2026))
+
+## Estimated benefit vs cost
+
+An **estimate**, not customer data. Benefit inputs are assumptions to test in a pilot; cost inputs are published prices and our measured usage. Illustrative firm: pays out SGD 600,000 a year in about 100 payments, SGD 200,000 of it for materials.
+
+| Benefit (per year) | Assumption | SGD |
+|---|---|---|
+| Overbilling and duplicates caught | 1% of payouts overbilled, half caught | 3,000 |
+| Better materials prices | 3% below the first quote (the demo negotiated 16% below an opening quote, but its suppliers are simulated) | 6,000 |
+| Admin time saved | 3 hours a week at SGD 40/hour | 6,240 |
+| **Total** | | **≈ 15,200** |
+
+| Cost (per year) | Basis | SGD |
+|---|---|---|
+| PayPal Payouts fees | 100 payouts × SGD 1.60 domestic cap ([PayPal SG fees](https://www.paypal.com/sg/business/paypal-business-fees)) | 160 |
+| AI checks and negotiations | Gemini 3.1 Flash-Lite at US$0.30 / 1M input and US$2.50 / 1M output tokens; one invoice check measured at 1,241 tokens ≈ US$0.0006 | < 5 |
+| Hosting share | Render Starter, US$7/month | 115 |
+| ProofPay subscription | Proposed SGD 49/month | 588 |
+| **Total** | | **≈ 870** |
+
+That is roughly an **18× return**. Counting only the overbilling caught, it is still about **3.5×**.
 ## What it does
 
 ProofPay holds a project budget and releases it only against proof, in two ways:

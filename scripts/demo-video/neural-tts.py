@@ -6,14 +6,13 @@ RATE = "+6%"
 
 intro = [
     ("slide1", "This is ProofPay: AI agents that buy and pay, but only for verified work."),
-    ("slide2", "Builders, event companies and agencies pay others to deliver. Deposits go out before the work is checked, invoices get padded, and quotes eat up hours."),
+    ("slide2", "Why it matters. Fraud examiners estimate businesses lose five percent of revenue to fraud, and a typical fraud runs a year before it's caught. And four in five Singapore firms report late payments, mostly from slow approvals and invoicing."),
     ("slide3", "ProofPay releases money in six steps. Proof is uploaded, Gemini checks it, and hard rules in code can only make it stricter. The owner approves, PayPal pays, and a signed webhook confirms. Let's see it live."),
 ]
 outro = [
-    ("slide10", "It runs on PayPal Payouts, Invoicing and Webhooks, with Gemini and Channel3."),
+    ("slide10", "For a small firm paying out six hundred thousand dollars a year, we estimate about fifteen thousand dollars of benefit, for under nine hundred dollars of cost. That's an estimate to prove in a pilot."),
     ("slide12", "ProofPay. Proof first, then pay. Try it live, the passcode is in the README."),
 ]
-
 async def say(name, text):
     path = f"{OUT}\\{name}.mp3"
     await edge_tts.Communicate(text, VOICE, rate=RATE).save(path)
