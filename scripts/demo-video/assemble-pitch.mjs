@@ -76,8 +76,10 @@ clock += segLen;
   const out = `${tmp}\\p4b-ledger.mp4`;
   ff([
     "-ss", from.toFixed(2), "-t", d.toFixed(2), "-i", `${base}\\ledger-raw.webm`, "-i", clip.file,
+    "-loop", "1", "-t", d.toFixed(2), "-i", `${base}\\ledger-caption.png`,
     "-filter_complex",
-    `[0:v]scale=1152:720,pad=1280:720:64:0:color=${NAVY},fps=30,fade=t=in:st=0:d=0.3,fade=t=out:st=${(d - 0.3).toFixed(2)}:d=0.3[v];[1:a]aresample=48000,adelay=300|300,apad,atrim=0:${d.toFixed(2)}[a]`,
+    // Same caption box as the demo recording (record-demo.mjs), drawn at 1280x800 and scaled with the frame.
+    `[0:v][2:v]overlay=0:0:enable='between(t,0.3,${(0.3 + clip.duration).toFixed(2)})',scale=1152:720,pad=1280:720:64:0:color=${NAVY},fps=30,fade=t=in:st=0:d=0.3,fade=t=out:st=${(d - 0.3).toFixed(2)}:d=0.3[v];[1:a]aresample=48000,adelay=300|300,apad,atrim=0:${d.toFixed(2)}[a]`,
     "-map", "[v]", "-map", "[a]", ...enc, "-t", d.toFixed(2), out,
   ]);
   srt.push([clock + 0.3, clock + 0.3 + clip.duration, clip.text]);
