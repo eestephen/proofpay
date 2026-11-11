@@ -37,6 +37,26 @@ export type BoardRow = {
 
 export type Board = ProjectSummary & { rows: BoardRow[] };
 
+/** Cross-project ledger for the owner. Amounts are major units (numbers) for grids and charts. */
+export type Ledger = {
+  currency: string;
+  projects: { id: number; name: string; budget: number; released: number; committed: number; remaining: number }[];
+  payments: {
+    kind: "Milestone" | "Supplier order";
+    projectId: number;
+    projectName: string;
+    item: string;
+    payee: string;
+    amount: number;
+    status: string;
+    payoutStatus: string | null;
+    batchId: string | null;
+    href: string;
+  }[];
+  audit: { at: string; projectName: string; subject: string; kind: string; detail: string }[];
+  totals: { budget: number; released: number; committed: number; remaining: number; paidCount: number };
+};
+
 export type PurchaseQuoteRow = {
   supplierId: string;
   supplierName: string;
@@ -1144,6 +1164,95 @@ export function createService({
     },
 
     getPurchase,
+
+    getLedger(credential: Credential): Ledger {
+      requireOwner(credential);
+      const rows = db.prepare(`${PROJECT_SQL} ORDER BY p.id`).all() as ProjectRow[];
+      const projects = rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        budget: r.budget_minor / 100,
+        released: r.released_minor / 100,
+        committed: r.in_flight_minor / 100,
+        remaining: remainingMinor(r) / 100,
+      }));
+      const milestones = (
+        db
+          .prepare(
+            `SELECT m.id, m.project_id, p.name AS project_name, m.title, m.payee_name, m.amount_minor, m.status,
+                    m.payout_status, m.payout_batch_id
+             FROM milestone m JOIN project p ON p.id = m.project_id
+             WHERE m.payout_attempts > 0 ORDER BY m.id`,
+          )
+          .all() as {
+          id: number;
+          project_id: number;
+          project_name: string;
+          title: string;
+          payee_name: string;
+          amount_minor: number;
+          status: string;
+          payout_status: string | null;
+          payout_batch_id: string | null;
+        }[]
+      ).map((m) => ({
+        kind: "Milestone" as const,
+        projectId: m.project_id,
+        projectName: m.project_name,
+        item: m.title,
+        payee: m.payee_name,
+        amount: m.amount_minor / 100,
+        status: m.status,
+        payoutStatus: m.payout_status,
+        batchId: m.payout_batch_id,
+        href: `/milestones/${m.id}`,
+      }));
+      const orders = (db.prepare(`SELECT id FROM purchase WHERE order_status IS NOT NULL ORDER BY id`).all() as { id: number }[])
+        .map((r) => getPurchase(r.id)!)
+        .map((o) => ({
+          kind: "Supplier order" as const,
+          projectId: o.projectId,
+          projectName: rows.find((r) => r.id === o.projectId)?.name ?? "",
+          item: `${o.quantity} ${o.unit} ${o.item}`,
+          payee: o.order!.supplierName,
+          amount: Number(o.order!.total),
+          status: o.order!.status,
+          payoutStatus: o.order!.payoutStatus,
+          batchId: o.order!.payoutBatchId,
+          href: `/projects/${o.projectId}`,
+        }));
+      const audit = (
+        db
+          .prepare(
+            `SELECT a.at, a.kind, a.detail,
+                    COALESCE(pm.name, pp.name) AS project_name,
+                    COALESCE(m.title, pu.quantity || ' ' || pu.unit || ' ' || pu.item) AS subject
+             FROM audit a
+             LEFT JOIN milestone m ON m.id = a.milestone_id
+             LEFT JOIN project pm ON pm.id = m.project_id
+             LEFT JOIN purchase pu ON pu.id = a.purchase_id
+             LEFT JOIN project pp ON pp.id = pu.project_id
+             ORDER BY a.id DESC`,
+          )
+          .all() as { at: string; kind: string; detail: string; project_name: string; subject: string }[]
+      ).map((a) => ({ at: a.at, projectName: a.project_name, subject: a.subject, kind: a.kind, detail: a.detail }));
+      const sum = (k: "budget" | "released" | "committed" | "remaining") =>
+        Math.round(projects.reduce((s, p) => s + p[k], 0) * 100) / 100;
+      const payments = [...milestones, ...orders];
+      return {
+        currency: rows[0]?.currency ?? seed.currency,
+        projects,
+        payments,
+        audit,
+        totals: {
+          budget: sum("budget"),
+          released: sum("released"),
+          committed: sum("committed"),
+          remaining: sum("remaining"),
+          paidCount: payments.filter((p) => p.status === "paid" || p.status === "ordered").length,
+        },
+      };
+    },
 
     getMilestone(id: number): MilestoneView | undefined {
       return getMilestoneRow(id) ? view(id) : undefined;

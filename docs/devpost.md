@@ -76,7 +76,8 @@ downloadable test invoices):
   More than 100 tests drive that service with stand-ins for PayPal, Gemini and Channel3. Separate
   live tests run against the real services.
 - **SQLite** (`node:sqlite`), reseeded on boot, so judges always start from a clean demo.
-- **AG Grid Community** for the milestone board and the quote comparison.
+- **AG Grid Community** for the milestone board, the quote comparison and the **Ledger** page: every payment and supplier order across projects (filter any column; a pinned total row follows the filter; click through to the item) and the full audit trail across projects (paged, colour-coded by event).
+- **AG Charts Community** for the Ledger's budget chart: released, committed and remaining per project, stacked.
 
 ### PayPal: what we use and how
 
@@ -146,7 +147,7 @@ hard rules.
 
 ## Built with
 
-PayPal Payouts, PayPal Invoicing, PayPal Webhooks, Google Gemini, Vercel AI SDK, Channel3, AG Grid,
+PayPal Payouts, PayPal Invoicing, PayPal Webhooks, Google Gemini, Vercel AI SDK, Channel3, AG Grid, AG Charts,
 Next.js, TypeScript, Tailwind CSS, SQLite, Render, Vitest.
 
 ## Links

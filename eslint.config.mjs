@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Node build scripts for the slide deck and demo video, not app code.
+    "deck/**",
+    "scripts/demo-video/**",
   ]),
 ]);
 

@@ -95,7 +95,9 @@ you may see "wait about a minute". Click **Reset demo** to start over.
 | Buyer agent | Gemini Flash with tool calling (`request_quote`, `recommend`) | `src/server/negotiate.ts` |
 | Market prices | Channel3 `/v1/search`, with a fixed price list as fallback | `src/server/catalog.ts` |
 | Money | PayPal Payouts, Invoicing (create, send, record payment), Webhooks + verify-webhook-signature, OAuth | `src/server/paypal.ts` |
-| Tables | AG Grid Community | `src/app/projects/[id]/*-grid.tsx` |
+| Tables | AG Grid Community | `src/app/projects/[id]/*-grid.tsx`, `src/app/ledger/ledger-view.tsx` |
+| Charts | AG Charts Community | `src/app/ledger/ledger-view.tsx` |
+| Uptime ping | `GET /api/health` (no AI, PayPal or database) | `src/app/api/health/route.ts` |
 | Hosting | Render (free web service, `render.yaml`) | |
 
 ### Safety rules, enforced in code

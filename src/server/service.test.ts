@@ -871,3 +871,32 @@ describe("demo scenarios", () => {
     expect(service.listProjects()[2].fund.remaining).toBe("400.00");
   });
 });
+
+describe("ledger across projects", () => {
+  it("lists every payment and order across projects with totals, newest first", async () => {
+    const t = make();
+    const [kitchen, event] = t.service.listProjects();
+    const ev = t.service.getProject(event.id)!.milestones[0];
+    await t.service.submitProof(t.tilingId, png, t.owner);
+    await t.service.approveRelease(t.tilingId, t.owner);
+    t.verifier.willReturn({ extractedTotal: "2800.00" });
+    await t.service.submitProof(ev.id, { data: new Uint8Array([5, 5]), mediaType: "image/png" }, t.owner);
+    await t.service.approveRelease(ev.id, t.owner);
+    const p = await t.service.requestMaterials(kitchen.id, "Buy 40 m2 of tiles, max 1,300 SGD, within 5 days", t.owner);
+    await t.service.approveQuote(p.id, t.owner);
+
+    const l = t.service.getLedger(t.owner);
+    expect(l.payments.map((r) => r.kind).sort()).toEqual(["Milestone", "Milestone", "Supplier order"]);
+    expect(l.payments.find((r) => r.projectName === event.name)).toMatchObject({ payee: ev.payeeName, amount: 2800, status: "paid" });
+    expect(l.projects.find((r) => r.id === kitchen.id)).toMatchObject({ budget: 8000, released: 1200 + p.recommendation!.total });
+    expect(l.totals).toMatchObject({ budget: 23000, paidCount: 3 });
+    expect(l.totals.released).toBeCloseTo(1200 + 2800 + p.recommendation!.total);
+    expect(l.audit.length).toBeGreaterThan(5);
+    expect(l.audit[0].at >= l.audit.at(-1)!.at).toBe(true);
+    expect(l.audit.find((a) => a.kind === "quote")).toMatchObject({ projectName: kitchen.name, subject: expect.stringContaining("tiles") });
+  });
+
+  it("is owner only", () => {
+    expect(() => service.getLedger(undefined)).toThrow(/Owner passcode required/);
+  });
+});
